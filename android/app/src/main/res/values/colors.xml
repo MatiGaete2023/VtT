@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="white">#FFFFFFFF</color>
+    <color name="black">#FF000000</color>
+    <color name="teal_700">#FF00796B</color>
+    <color name="teal_900">#FF004D40</color>
+</resources>

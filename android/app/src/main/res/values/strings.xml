@@ -1,0 +1,12 @@
+<resources>
+    <string name="app_name">Transcriptor VtT</string>
+    <string name="select_audio">Seleccionar audio</string>
+    <string name="transcribe">Transcribir</string>
+    <string name="copy">Copiar</string>
+    <string name="share">Compartir</string>
+    <string name="model">Modelo</string>
+    <string name="language">Idioma</string>
+    <string name="no_file">Ningún archivo seleccionado</string>
+    <string name="ready">Listo.</string>
+    <string name="result_hint">Aquí aparecerá la transcripción…</string>
+</resources>

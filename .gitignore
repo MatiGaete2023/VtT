@@ -1,0 +1,24 @@
+# ---- Desktop (Python) ----
+desktop/.venv/
+__pycache__/
+*.pyc
+desktop/build/
+desktop/dist/
+desktop/*.spec
+transcriptor_config.json
+
+# ---- Android / Gradle ----
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/.cxx/
+android/captures/
+*.apk
+*.aab
+
+# ---- IDE / OS ----
+.idea/
+*.iml
+.DS_Store
+dist/

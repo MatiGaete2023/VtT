@@ -1,0 +1,5 @@
+# Dependencias del Transcriptor Whisper (multiplataforma: Windows, macOS, Linux).
+# faster-whisper trae CTranslate2 + PyAV, por lo que NO necesitas instalar FFmpeg
+# para transcribir. yt-dlp permite bajar audio de YouTube.
+faster-whisper>=1.0.0
+yt-dlp>=2024.8.6
