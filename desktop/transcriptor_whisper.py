@@ -456,7 +456,7 @@ class TranscriptorApp:
             wf = self.wave_file
             if wf is not None:
                 try:
-                    wf.writeframes(bytes(indata))
+                    wf.writeframes(indata.tobytes())
                 except Exception:
                     pass
 
@@ -464,7 +464,7 @@ class TranscriptorApp:
         # usa su frecuencia por defecto (Whisper la remuestrea igual).
         rate = 16000
         try:
-            self.grabador = sd.RawInputStream(
+            self.grabador = sd.InputStream(
                 samplerate=rate, channels=1, dtype="int16", device=dev, callback=callback)
         except Exception:
             try:
@@ -473,7 +473,7 @@ class TranscriptorApp:
             except Exception:
                 rate = 44100
             try:
-                self.grabador = sd.RawInputStream(
+                self.grabador = sd.InputStream(
                     samplerate=rate, channels=1, dtype="int16", device=dev, callback=callback)
             except Exception:
                 self.grabador = None
