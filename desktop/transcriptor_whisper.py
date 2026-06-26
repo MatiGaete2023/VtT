@@ -172,6 +172,11 @@ class TranscriptorApp:
         self.t_grab_inicio = 0.0
         self.ruta_grab = None
         self.entradas = []
+        self.cola_grab = None        # cola de bloques PCM (callback -> hilo escritor)
+        self.grab_stop = None        # evento para detener el hilo escritor
+        self.t_writer = None         # hilo que vuelca la cola al .wav
+        self.nivel_grab = 0.0        # nivel de entrada (0..1) para el medidor
+        self.grab_descarta = 0       # bloques a descartar al inicio (transitorio)
 
         self.cfg = cargar_config()
         self._ui()
@@ -216,6 +221,10 @@ class TranscriptorApp:
         self.btn_grab.pack(side="left")
         self.lbl_grab_t = ttk.Label(fr_rec, text="00:00", style="Subtitle.TLabel")
         self.lbl_grab_t.pack(side="left", padx=10)
+        ttk.Label(fr_rec, text="Nivel:").pack(side="left")
+        self.pb_nivel = ttk.Progressbar(fr_rec, orient="horizontal",
+                                        mode="determinate", length=140, maximum=100)
+        self.pb_nivel.pack(side="left", padx=(4, 0))
 
         fr_files = ttk.LabelFrame(cont, text="Archivos de audio / video", padding=8)
         fr_files.pack(fill="both", expand=True, **pad)
@@ -431,18 +440,80 @@ class TranscriptorApp:
         else:
             self._iniciar_grabacion()
 
-    def _iniciar_grabacion(self):
+    def _asegurar_sounddevice(self):
+        """Importa sounddevice; si falta, ofrece instalarlo en el acto (sin reiniciar).
+
+        Devuelve el módulo sounddevice o None. Maneja el caso de Linux sin
+        PortAudio (libportaudio2) con un mensaje claro."""
         try:
             import sounddevice as sd
+            return sd
+        except OSError:
+            # El módulo está, pero falta la librería nativa PortAudio (típico en Linux).
+            messagebox.showerror(
+                "Grabación",
+                "El sistema no tiene la librería de audio PortAudio.\n\n"
+                "En Linux instálala una vez con:\n"
+                "    sudo apt install libportaudio2\n\n"
+                "(En Windows y macOS no hace falta: viene incluida.)")
+            return None
+        except Exception:
+            pass
+
+        # Falta el paquete: ofrecer instalarlo automáticamente en este mismo entorno.
+        if not messagebox.askyesno(
+                "Instalar grabación",
+                "Para grabar falta el componente 'sounddevice'.\n\n"
+                "¿Quieres que lo instale ahora automáticamente?\n"
+                "(Solo se hace una vez; no necesitas cerrar la app.)"):
+            return None
+        self.lbl_st.config(text="Instalando componente de grabación…", foreground="gray")
+        self._escribe("Instalando 'sounddevice' (solo la primera vez)…")
+        self.root.update_idletasks()
+        try:
+            subprocess.check_call(
+                [sys.executable, "-m", "pip", "install", "--quiet", "sounddevice"])
         except Exception:
             messagebox.showerror(
                 "Grabación",
-                "Falta el módulo 'sounddevice'.\n\n"
-                "Cierra la app y ejecuta:  python run.py --update\n"
-                "(en Linux también: sudo apt install libportaudio2)")
+                "No se pudo instalar 'sounddevice' automáticamente.\n\n"
+                "Cierra la app y ejecuta:  python run.py --update")
+            return None
+        try:
+            import sounddevice as sd
+            self._escribe("Componente de grabación instalado.")
+            return sd
+        except OSError:
+            messagebox.showerror(
+                "Grabación",
+                "Falta la librería PortAudio del sistema.\n"
+                "En Linux:  sudo apt install libportaudio2")
+            return None
+        except Exception:
+            messagebox.showerror("Grabación",
+                                 "No se pudo activar la grabación. Reinicia la app.")
+            return None
+
+    def _iniciar_grabacion(self):
+        sd = self._asegurar_sounddevice()
+        if sd is None:
             return
+        import numpy as np
 
         dev = self._dev_seleccionado()
+        # Graba a la frecuencia NATIVA del dispositivo (sin forzar conversiones en
+        # PortAudio, que en algunos equipos producían ruido). Whisper remuestrea solo.
+        try:
+            info = sd.query_devices(dev, "input") if dev is not None \
+                else sd.query_devices(kind="input")
+            rate = int(info.get("default_samplerate") or 0) or 44100
+            max_ch = int(info.get("max_input_channels") or 1) or 1
+        except Exception:
+            rate, max_ch = 44100, 1
+        canales = 1 if max_ch >= 1 else max_ch
+        # Algunas entradas no admiten mono: si abrir con 1 canal falla, usamos los
+        # que tenga y los mezclamos a mono nosotros.
+
         base = self.v_out.get().strip()
         if base and os.path.isdir(base):
             carpeta = base
@@ -452,33 +523,39 @@ class TranscriptorApp:
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         self.ruta_grab = os.path.join(carpeta, f"grabacion_{ts}.wav")
 
-        def callback(indata, frames, tinfo, status):
-            wf = self.wave_file
-            if wf is not None:
-                try:
-                    wf.writeframes(indata.tobytes())
-                except Exception:
-                    pass
+        self.cola_grab = queue.Queue()
+        self.nivel_grab = 0.0
+        # Descarta el primer ~120 ms (transitorio/pop de arranque del micrófono).
+        self.grab_descarta = int(rate * 0.12)
 
-        # Intenta 16 kHz mono (ideal para Whisper); si el dispositivo no lo admite,
-        # usa su frecuencia por defecto (Whisper la remuestrea igual).
-        rate = 16000
+        def callback(indata, frames, tinfo, status):
+            try:
+                # Nivel de entrada (pico) para el medidor visual.
+                pico = float(np.abs(indata).max()) / 32768.0
+                self.nivel_grab = pico
+                # Mezcla a mono si llegaran varios canales.
+                mono = indata if indata.ndim == 1 or indata.shape[1] == 1 \
+                    else indata.mean(axis=1)
+                mono = np.asarray(mono, dtype=np.int16)
+                self.cola_grab.put(mono.tobytes())
+            except Exception:
+                pass
+
+        def abrir(ch):
+            return sd.InputStream(samplerate=rate, channels=ch, dtype="int16",
+                                  device=dev, blocksize=0, callback=callback)
         try:
-            self.grabador = sd.InputStream(
-                samplerate=rate, channels=1, dtype="int16", device=dev, callback=callback)
+            self.grabador = abrir(canales)
         except Exception:
             try:
-                info = sd.query_devices(dev, "input") if dev is not None else sd.query_devices(kind="input")
-                rate = int(info.get("default_samplerate", 44100)) or 44100
-            except Exception:
-                rate = 44100
-            try:
-                self.grabador = sd.InputStream(
-                    samplerate=rate, channels=1, dtype="int16", device=dev, callback=callback)
+                canales = max_ch
+                self.grabador = abrir(canales)
             except Exception:
                 self.grabador = None
-                messagebox.showerror("Grabación",
-                                     "No se pudo abrir el dispositivo de entrada seleccionado.")
+                messagebox.showerror(
+                    "Grabación",
+                    "No se pudo abrir el dispositivo de entrada seleccionado.\n"
+                    "Prueba con otra 'Entrada' de la lista.")
                 return
 
         try:
@@ -486,6 +563,16 @@ class TranscriptorApp:
             self.wave_file.setnchannels(1)
             self.wave_file.setsampwidth(2)
             self.wave_file.setframerate(rate)
+        except Exception:
+            self._cerrar_grabador()
+            messagebox.showerror("Grabación", "No se pudo crear el archivo de grabación.")
+            return
+
+        # Hilo escritor: vuelca la cola al .wav (desacopla el audio en tiempo real del disco).
+        self.grab_stop = threading.Event()
+        self.t_writer = threading.Thread(target=self._writer_grab, daemon=True)
+        self.t_writer.start()
+        try:
             self.grabador.start()
         except Exception:
             self._cerrar_grabador()
@@ -495,15 +582,43 @@ class TranscriptorApp:
         self.grabando = True
         self.t_grab_inicio = time.time()
         self.btn_grab.config(text="■  Detener")
-        self._escribe(f"Grabando desde la entrada ({rate} Hz) -> {Path(self.ruta_grab).name}")
-        self.lbl_st.config(text="Grabando... pulsa Detener para finalizar.", foreground="gray")
+        self._escribe(f"Grabando desde la entrada ({rate} Hz, {canales} canal/es) "
+                      f"-> {Path(self.ruta_grab).name}")
+        self.lbl_st.config(text="Grabando… habla y observa el medidor de Nivel.",
+                           foreground="gray")
         self._tick_grab()
+
+    def _writer_grab(self):
+        """Drena la cola de bloques PCM y los escribe al .wav (hilo aparte)."""
+        while True:
+            try:
+                bloque = self.cola_grab.get(timeout=0.2)
+            except queue.Empty:
+                if self.grab_stop is not None and self.grab_stop.is_set():
+                    break
+                continue
+            if bloque is None:
+                break
+            # Descarta el transitorio inicial (en bytes: 2 por muestra int16).
+            if self.grab_descarta > 0:
+                saltar = min(self.grab_descarta * 2, len(bloque))
+                bloque = bloque[saltar:]
+                self.grab_descarta -= saltar // 2
+                if not bloque:
+                    continue
+            wf = self.wave_file
+            if wf is not None:
+                try:
+                    wf.writeframes(bloque)
+                except Exception:
+                    pass
 
     def _detener_grabacion(self):
         self.grabando = False
         self._cerrar_grabador()
         self.btn_grab.config(text="●  Grabar")
         self.lbl_grab_t.config(text="00:00")
+        self.pb_nivel["value"] = 0
         if self.ruta_grab and os.path.exists(self.ruta_grab) and os.path.getsize(self.ruta_grab) > 44:
             self._insertar_archivo(self.ruta_grab)
             self._escribe(f"Grabación guardada y agregada: {Path(self.ruta_grab).name}")
@@ -520,6 +635,19 @@ class TranscriptorApp:
         except Exception:
             pass
         self.grabador = None
+        # Detiene el hilo escritor y espera a que vacíe la cola pendiente.
+        try:
+            if self.grab_stop is not None:
+                self.grab_stop.set()
+            if self.cola_grab is not None:
+                self.cola_grab.put(None)
+            if self.t_writer is not None:
+                self.t_writer.join(timeout=2.0)
+        except Exception:
+            pass
+        self.t_writer = None
+        self.grab_stop = None
+        self.cola_grab = None
         try:
             if self.wave_file is not None:
                 self.wave_file.close()
@@ -532,7 +660,10 @@ class TranscriptorApp:
             return
         seg = int(time.time() - self.t_grab_inicio)
         self.lbl_grab_t.config(text=f"{seg // 60:02d}:{seg % 60:02d}")
-        self.root.after(500, self._tick_grab)
+        # Medidor de nivel: realza un poco para que la voz normal sea bien visible.
+        pct = int(min(100.0, self.nivel_grab * 100.0 * 1.6))
+        self.pb_nivel["value"] = pct
+        self.root.after(150, self._tick_grab)
 
     def _iniciar(self):
         if self.transcribiendo:
