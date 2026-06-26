@@ -7,6 +7,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.provider.OpenableColumns
+import android.view.View
 import android.widget.ArrayAdapter
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
@@ -22,7 +23,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var b: ActivityMainBinding
     private val transcriber = Transcriber()
 
-    // Etiquetas visibles e idiomas (codigo ISO; "" = deteccion automatica).
+    // Etiquetas visibles e idiomas (código ISO; "" = detección automática).
     private val langLabels = listOf("Español", "Inglés", "Portugués", "Francés", "Detección automática")
     private val langCodes = listOf("es", "en", "pt", "fr", "")
 
@@ -30,7 +31,7 @@ class MainActivity : AppCompatActivity() {
     private var working = false
 
     private val pickAudio =
-        registerForActivityResult(ActivityResultContracts.OpenDocument) { uri ->
+        registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
             if (uri != null) {
                 try {
                     contentResolver.takePersistableUriPermission(
@@ -50,17 +51,18 @@ class MainActivity : AppCompatActivity() {
 
         val prefs = getSharedPreferences("vtt", Context.MODE_PRIVATE)
 
-        b.spinnerModel.adapter = ArrayAdapter(
-            this, android.R.layout.simple_spinner_dropdown_item, ModelManager.MODELS
+        b.ddModel.setAdapter(
+            ArrayAdapter(this, android.R.layout.simple_list_item_1, ModelManager.MODELS)
         )
-        b.spinnerLanguage.adapter = ArrayAdapter(
-            this, android.R.layout.simple_spinner_dropdown_item, langLabels
+        b.ddLanguage.setAdapter(
+            ArrayAdapter(this, android.R.layout.simple_list_item_1, langLabels)
         )
-        val savedModel = prefs.getString("model", "base") ?: "base"
-        b.spinnerModel.setSelection(
-            ModelManager.MODELS.indexOf(savedModel).coerceAtLeast(0)
-        )
-        b.spinnerLanguage.setSelection(prefs.getInt("lang", 0))
+
+        val savedModel = (prefs.getString("model", "base") ?: "base")
+            .takeIf { it in ModelManager.MODELS } ?: "base"
+        val savedLangPos = prefs.getInt("lang", 0).coerceIn(0, langLabels.lastIndex)
+        b.ddModel.setText(savedModel, false)
+        b.ddLanguage.setText(langLabels[savedLangPos], false)
 
         b.btnSelect.setOnClickListener {
             pickAudio.launch(arrayOf("audio/*", "video/*"))
@@ -68,8 +70,8 @@ class MainActivity : AppCompatActivity() {
 
         b.btnTranscribe.setOnClickListener {
             val uri = selectedUri ?: return@setOnClickListener
-            val model = ModelManager.MODELS[b.spinnerModel.selectedItemPosition]
-            val langPos = b.spinnerLanguage.selectedItemPosition
+            val model = b.ddModel.text.toString().takeIf { it in ModelManager.MODELS } ?: "base"
+            val langPos = langLabels.indexOf(b.ddLanguage.text.toString()).coerceAtLeast(0)
             prefs.edit()
                 .putString("model", model)
                 .putInt("lang", langPos)
@@ -106,6 +108,8 @@ class MainActivity : AppCompatActivity() {
                 if (!ModelManager.isDownloaded(this@MainActivity, model)) {
                     setStatus("Descargando modelo '$model' (solo la primera vez)…")
                     b.progress.isIndeterminate = false
+                } else {
+                    b.progress.isIndeterminate = true
                 }
                 val modelFile = withContext(Dispatchers.IO) {
                     ModelManager.ensureModel(this@MainActivity, model) { pct ->
@@ -143,12 +147,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setBusy(busy: Boolean) {
-        b.progress.visibility = if (busy) android.view.View.VISIBLE else android.view.View.GONE
-        if (busy) b.progress.isIndeterminate = true
+        b.progress.visibility = if (busy) View.VISIBLE else View.GONE
         b.btnTranscribe.isEnabled = !busy && selectedUri != null
         b.btnSelect.isEnabled = !busy
-        b.spinnerModel.isEnabled = !busy
-        b.spinnerLanguage.isEnabled = !busy
+        b.tilModel.isEnabled = !busy
+        b.tilLanguage.isEnabled = !busy
     }
 
     private fun setStatus(msg: String) {
@@ -162,7 +165,7 @@ class MainActivity : AppCompatActivity() {
                 val idx = c.getColumnIndex(OpenableColumns.DISPLAY_NAME)
                 if (idx >= 0 && c.moveToFirst()) name = c.getString(idx)
             }
-        } catch (_: Exception) { /* usar el fallback */ }
+        } catch (_: Exception) { /* usar el respaldo */ }
         return name
     }
 

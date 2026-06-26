@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Paleta oscura: mismos acentos, superficies profundas para modo noche. -->
+    <color name="primary">#CFBCFF</color>
+    <color name="on_primary">#381E72</color>
+    <color name="primary_container">#4F378B</color>
+    <color name="on_primary_container">#E7DEFF</color>
+
+    <color name="secondary">#4FD9C9</color>
+    <color name="on_secondary">#003731</color>
+    <color name="secondary_container">#005048</color>
+    <color name="on_secondary_container">#B7FFF4</color>
+
+    <color name="tertiary">#FFB1C6</color>
+    <color name="on_tertiary">#5E1133</color>
+
+    <color name="background">#131318</color>
+    <color name="on_background">#E5E1E9</color>
+    <color name="surface">#1C1B22</color>
+    <color name="on_surface">#E5E1E9</color>
+    <color name="surface_variant">#48454E</color>
+    <color name="on_surface_variant">#CAC4D0</color>
+    <color name="outline">#948F99</color>
+</resources>

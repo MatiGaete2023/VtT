@@ -1,7 +1,24 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="white">#FFFFFFFF</color>
-    <color name="black">#FF000000</color>
-    <color name="teal_700">#FF00796B</color>
-    <color name="teal_900">#FF004D40</color>
+    <!-- Paleta clara: violeta vibrante + acento turquesa, superficies neutras y limpias. -->
+    <color name="primary">#6C4DF2</color>
+    <color name="on_primary">#FFFFFF</color>
+    <color name="primary_container">#E7DEFF</color>
+    <color name="on_primary_container">#21005D</color>
+
+    <color name="secondary">#00B5A5</color>
+    <color name="on_secondary">#FFFFFF</color>
+    <color name="secondary_container">#B7FFF4</color>
+    <color name="on_secondary_container">#00201C</color>
+
+    <color name="tertiary">#FF5C8A</color>
+    <color name="on_tertiary">#FFFFFF</color>
+
+    <color name="background">#FBFAFF</color>
+    <color name="on_background">#1B1B1F</color>
+    <color name="surface">#FFFFFF</color>
+    <color name="on_surface">#1B1B1F</color>
+    <color name="surface_variant">#F1ECFB</color>
+    <color name="on_surface_variant">#49454E</color>
+    <color name="outline">#CAC4D0</color>
 </resources>

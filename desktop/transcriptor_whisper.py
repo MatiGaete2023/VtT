@@ -47,6 +47,19 @@ MESES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio",
          "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
 CONFIG_PATH = Path(__file__).parent / "transcriptor_config.json"
 
+# Paleta moderna (violeta vibrante + superficies claras), minimalista.
+PALETA = {
+    "bg": "#F4F2FB",
+    "surface": "#FFFFFF",
+    "primary": "#6C4DF2",
+    "primary_dark": "#5538D6",
+    "primary_soft": "#ECE8FB",
+    "text": "#1B1B1F",
+    "muted": "#6B6878",
+    "border": "#DED9F0",
+    "trough": "#E7E2F7",
+}
+
 
 class Cancelado(Exception):
     pass
@@ -142,8 +155,14 @@ class TranscriptorApp:
 
     def _ui(self):
         pad = {"padx": 8, "pady": 4}
-        cont = ttk.Frame(self.root, padding=10)
+        cont = ttk.Frame(self.root, padding=14)
         cont.pack(fill="both", expand=True)
+
+        header = ttk.Frame(cont)
+        header.pack(fill="x", padx=4, pady=(0, 10))
+        ttk.Label(header, text="🎙  Transcriptor Whisper", style="Title.TLabel").pack(anchor="w")
+        ttk.Label(header, text="Voz a texto en tu equipo · privado y sin conexión",
+                  style="Subtitle.TLabel").pack(anchor="w")
 
         fr_ff = ttk.LabelFrame(cont, text="FFmpeg (opcional, solo mejora descargas de YouTube)", padding=8)
         fr_ff.pack(fill="x", **pad)
@@ -160,7 +179,11 @@ class TranscriptorApp:
 
         fr_files = ttk.LabelFrame(cont, text="Archivos de audio / video", padding=8)
         fr_files.pack(fill="both", expand=True, **pad)
-        self.lst = tk.Listbox(fr_files, height=6, selectmode="extended")
+        self.lst = tk.Listbox(fr_files, height=6, selectmode="extended",
+                              bg=PALETA["surface"], fg=PALETA["text"], borderwidth=0,
+                              highlightthickness=1, highlightbackground=PALETA["border"],
+                              selectbackground=PALETA["primary"], selectforeground="#FFFFFF",
+                              activestyle="none")
         self.lst.pack(side="left", fill="both", expand=True)
         sb = ttk.Scrollbar(fr_files, orient="vertical", command=self.lst.yview)
         sb.pack(side="left", fill="y")
@@ -210,7 +233,7 @@ class TranscriptorApp:
 
         fr_a = ttk.Frame(cont)
         fr_a.pack(fill="x", **pad)
-        self.btn_run = ttk.Button(fr_a, text="Transcribir", command=self._iniciar)
+        self.btn_run = ttk.Button(fr_a, text="Transcribir", command=self._iniciar, style="Accent.TButton")
         self.btn_run.pack(side="left")
         self.btn_cancel = ttk.Button(fr_a, text="Cancelar", command=self._cancelar, state="disabled")
         self.btn_cancel.pack(side="left", padx=8)
@@ -224,7 +247,10 @@ class TranscriptorApp:
 
         fr_l = ttk.LabelFrame(cont, text="Registro", padding=8)
         fr_l.pack(fill="both", expand=True, **pad)
-        self.log = scrolledtext.ScrolledText(fr_l, height=8, state="disabled", wrap="word")
+        self.log = scrolledtext.ScrolledText(fr_l, height=8, state="disabled", wrap="word",
+                                             bg=PALETA["surface"], fg=PALETA["text"], borderwidth=0,
+                                             highlightthickness=1, highlightbackground=PALETA["border"],
+                                             insertbackground=PALETA["text"])
         self.log.pack(fill="both", expand=True)
 
     def _aplicar_config(self):
@@ -537,22 +563,61 @@ class TranscriptorApp:
         self.root.destroy()
 
 
-def _aplicar_tema(root):
-    """Selecciona un tema ttk disponible segun el sistema operativo."""
+def _fuente_ui():
+    """Familia tipografica agradable segun el sistema (con respaldo automatico)."""
+    if sys.platform.startswith("win"):
+        return "Segoe UI"
+    if sys.platform == "darwin":
+        return "Helvetica Neue"
+    return "DejaVu Sans"
+
+
+def _aplicar_estilo(root):
+    """Aplica un estilo plano, moderno y con color (minimalista) a la interfaz."""
     style = ttk.Style()
-    disponibles = style.theme_names()
-    for tema in ("vista", "aqua", "clam", "default"):
-        if tema in disponibles:
-            try:
-                style.theme_use(tema)
-                break
-            except Exception:
-                continue
+    try:
+        style.theme_use("clam")  # base themeable y consistente entre sistemas
+    except Exception:
+        pass
+
+    p = PALETA
+    fam = _fuente_ui()
+    root.configure(bg=p["bg"])
+
+    style.configure(".", background=p["bg"], foreground=p["text"], font=(fam, 10))
+    style.configure("TFrame", background=p["bg"])
+    style.configure("TLabel", background=p["bg"], foreground=p["text"])
+    style.configure("Title.TLabel", background=p["bg"], foreground=p["text"], font=(fam, 17, "bold"))
+    style.configure("Subtitle.TLabel", background=p["bg"], foreground=p["muted"], font=(fam, 10))
+
+    style.configure("TLabelframe", background=p["bg"], bordercolor=p["border"], relief="solid", borderwidth=1)
+    style.configure("TLabelframe.Label", background=p["bg"], foreground=p["primary"], font=(fam, 10, "bold"))
+
+    style.configure("TButton", background=p["surface"], foreground=p["text"],
+                    borderwidth=1, focusthickness=0, padding=(10, 6), relief="flat")
+    style.map("TButton",
+              background=[("active", p["primary_soft"]), ("disabled", "#EFEDF6")],
+              bordercolor=[("active", p["primary"])])
+
+    style.configure("Accent.TButton", background=p["primary"], foreground="#FFFFFF",
+                    borderwidth=0, padding=(14, 9), font=(fam, 10, "bold"), relief="flat")
+    style.map("Accent.TButton",
+              background=[("active", p["primary_dark"]), ("disabled", "#C5BEEC")],
+              foreground=[("disabled", "#F2F0FB")])
+
+    style.configure("TCheckbutton", background=p["bg"], foreground=p["text"])
+    style.map("TCheckbutton", background=[("active", p["bg"])])
+    style.configure("TEntry", fieldbackground=p["surface"], bordercolor=p["border"], padding=4)
+    style.configure("TCombobox", fieldbackground=p["surface"], background=p["surface"], padding=4)
+    style.configure("TProgressbar", background=p["primary"], troughcolor=p["trough"],
+                    bordercolor=p["trough"], lightcolor=p["primary"], darkcolor=p["primary"])
+    style.configure("Vertical.TScrollbar", background=p["bg"], troughcolor=p["bg"],
+                    bordercolor=p["bg"], arrowcolor=p["muted"])
 
 
 def main():
     root = tk.Tk()
-    _aplicar_tema(root)
+    _aplicar_estilo(root)
     TranscriptorApp(root)
     root.mainloop()
 
