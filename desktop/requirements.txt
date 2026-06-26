@@ -3,3 +3,6 @@
 # para transcribir. yt-dlp permite bajar audio de YouTube.
 faster-whisper>=1.0.0
 yt-dlp>=2024.8.6
+# Grabacion desde el microfono / entrada de audio (PortAudio incluido en las
+# ruedas de Windows/macOS; en Linux instala ademas: sudo apt install libportaudio2).
+sounddevice>=0.4.6

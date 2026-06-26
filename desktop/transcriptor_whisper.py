@@ -21,8 +21,10 @@ import os
 import sys
 import time
 import json
+import wave
 import queue
 import shutil
+import textwrap
 import subprocess
 import tempfile
 import threading
@@ -89,6 +91,23 @@ def ts_vtt(t):
     return ts_srt(t).replace(",", ".")
 
 
+# Ancho de linea para el .txt (y el texto completo del .md). 0 = sin ajuste.
+ANCHO_TXT = 100
+
+
+def envolver_texto(texto, ancho=ANCHO_TXT):
+    """Ajusta el texto a un ancho legible para no tener que desplazarse al lado."""
+    if not ancho or ancho <= 0:
+        return texto
+    salida = []
+    for parrafo in texto.splitlines() or [texto]:
+        if parrafo.strip():
+            salida.append(textwrap.fill(parrafo, width=ancho))
+        else:
+            salida.append("")
+    return "\n".join(salida)
+
+
 def abrir_en_explorador(ruta):
     """Abre una carpeta en el explorador de archivos del sistema (Windows/macOS/Linux)."""
     try:
@@ -146,6 +165,14 @@ class TranscriptorApp:
         self.cancelar = threading.Event()
         self.temp_dirs = []
 
+        # Estado de grabacion desde el microfono / entrada de audio.
+        self.grabando = False
+        self.grabador = None
+        self.wave_file = None
+        self.t_grab_inicio = 0.0
+        self.ruta_grab = None
+        self.entradas = []
+
         self.cfg = cargar_config()
         self._ui()
         self._init_ffmpeg()
@@ -176,6 +203,19 @@ class TranscriptorApp:
         ttk.Entry(fr_yt, textvariable=self.var_url).pack(side="left", fill="x", expand=True, padx=(0, 8))
         self.btn_yt = ttk.Button(fr_yt, text="Descargar audio y agregar", command=self._descargar_yt)
         self.btn_yt.pack(side="right")
+
+        fr_rec = ttk.LabelFrame(cont, text="Grabar desde micrófono / entrada de audio", padding=8)
+        fr_rec.pack(fill="x", **pad)
+        ttk.Label(fr_rec, text="Entrada:").pack(side="left")
+        self.cmb_dev = ttk.Combobox(fr_rec, state="readonly", width=32)
+        self.cmb_dev.pack(side="left", padx=(4, 8))
+        self.entradas = self._dispositivos_entrada()
+        self.cmb_dev["values"] = ["Predeterminada"] + [n for _, n in self.entradas]
+        self.cmb_dev.current(0)
+        self.btn_grab = ttk.Button(fr_rec, text="●  Grabar", command=self._toggle_grabar)
+        self.btn_grab.pack(side="left")
+        self.lbl_grab_t = ttk.Label(fr_rec, text="00:00", style="Subtitle.TLabel")
+        self.lbl_grab_t.pack(side="left", padx=10)
 
         fr_files = ttk.LabelFrame(cont, text="Archivos de audio / video", padding=8)
         fr_files.pack(fill="both", expand=True, **pad)
@@ -362,6 +402,138 @@ class TranscriptorApp:
         except Exception:
             self.cola.put(("yt_err", traceback.format_exc()))
 
+    # ----- Grabacion desde el microfono / entrada de audio -----
+    def _dispositivos_entrada(self):
+        """Lista los dispositivos de ENTRADA (microfono, linea), no la salida."""
+        try:
+            import sounddevice as sd
+            devs = sd.query_devices()
+            return [(i, d["name"]) for i, d in enumerate(devs)
+                    if d.get("max_input_channels", 0) > 0]
+        except Exception:
+            return []
+
+    def _dev_seleccionado(self):
+        try:
+            sel = self.cmb_dev.current()
+        except Exception:
+            sel = 0
+        if sel <= 0:
+            return None  # entrada predeterminada del sistema
+        try:
+            return self.entradas[sel - 1][0]
+        except Exception:
+            return None
+
+    def _toggle_grabar(self):
+        if self.grabando:
+            self._detener_grabacion()
+        else:
+            self._iniciar_grabacion()
+
+    def _iniciar_grabacion(self):
+        try:
+            import sounddevice as sd
+        except Exception:
+            messagebox.showerror(
+                "Grabación",
+                "Falta el módulo 'sounddevice'.\n\n"
+                "Cierra la app y ejecuta:  python run.py --update\n"
+                "(en Linux también: sudo apt install libportaudio2)")
+            return
+
+        dev = self._dev_seleccionado()
+        base = self.v_out.get().strip()
+        if base and os.path.isdir(base):
+            carpeta = base
+        else:
+            carpeta = tempfile.mkdtemp(prefix="grab_")
+            self.temp_dirs.append(carpeta)
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.ruta_grab = os.path.join(carpeta, f"grabacion_{ts}.wav")
+
+        def callback(indata, frames, tinfo, status):
+            wf = self.wave_file
+            if wf is not None:
+                try:
+                    wf.writeframes(bytes(indata))
+                except Exception:
+                    pass
+
+        # Intenta 16 kHz mono (ideal para Whisper); si el dispositivo no lo admite,
+        # usa su frecuencia por defecto (Whisper la remuestrea igual).
+        rate = 16000
+        try:
+            self.grabador = sd.RawInputStream(
+                samplerate=rate, channels=1, dtype="int16", device=dev, callback=callback)
+        except Exception:
+            try:
+                info = sd.query_devices(dev, "input") if dev is not None else sd.query_devices(kind="input")
+                rate = int(info.get("default_samplerate", 44100)) or 44100
+            except Exception:
+                rate = 44100
+            try:
+                self.grabador = sd.RawInputStream(
+                    samplerate=rate, channels=1, dtype="int16", device=dev, callback=callback)
+            except Exception:
+                self.grabador = None
+                messagebox.showerror("Grabación",
+                                     "No se pudo abrir el dispositivo de entrada seleccionado.")
+                return
+
+        try:
+            self.wave_file = wave.open(self.ruta_grab, "wb")
+            self.wave_file.setnchannels(1)
+            self.wave_file.setsampwidth(2)
+            self.wave_file.setframerate(rate)
+            self.grabador.start()
+        except Exception:
+            self._cerrar_grabador()
+            messagebox.showerror("Grabación", "No se pudo iniciar la grabación.")
+            return
+
+        self.grabando = True
+        self.t_grab_inicio = time.time()
+        self.btn_grab.config(text="■  Detener")
+        self._escribe(f"Grabando desde la entrada ({rate} Hz) -> {Path(self.ruta_grab).name}")
+        self.lbl_st.config(text="Grabando... pulsa Detener para finalizar.", foreground="gray")
+        self._tick_grab()
+
+    def _detener_grabacion(self):
+        self.grabando = False
+        self._cerrar_grabador()
+        self.btn_grab.config(text="●  Grabar")
+        self.lbl_grab_t.config(text="00:00")
+        if self.ruta_grab and os.path.exists(self.ruta_grab) and os.path.getsize(self.ruta_grab) > 44:
+            self._insertar_archivo(self.ruta_grab)
+            self._escribe(f"Grabación guardada y agregada: {Path(self.ruta_grab).name}")
+            self.lbl_st.config(text="Grabación lista. Ya puedes transcribirla.", foreground="gray")
+        else:
+            self._escribe("Grabación vacía o no guardada.")
+        self.ruta_grab = None
+
+    def _cerrar_grabador(self):
+        try:
+            if self.grabador is not None:
+                self.grabador.stop()
+                self.grabador.close()
+        except Exception:
+            pass
+        self.grabador = None
+        try:
+            if self.wave_file is not None:
+                self.wave_file.close()
+        except Exception:
+            pass
+        self.wave_file = None
+
+    def _tick_grab(self):
+        if not self.grabando:
+            return
+        seg = int(time.time() - self.t_grab_inicio)
+        self.lbl_grab_t.config(text=f"{seg // 60:02d}:{seg % 60:02d}")
+        self.root.after(500, self._tick_grab)
+
     def _iniciar(self):
         if self.transcribiendo:
             return
@@ -449,7 +621,7 @@ class TranscriptorApp:
         escritos = []
         if formatos["txt"]:
             p = tronco.with_suffix(".txt")
-            p.write_text(texto + "\n", encoding="utf-8")
+            p.write_text(envolver_texto(texto) + "\n", encoding="utf-8")
             escritos.append(p.name)
         if formatos["md"]:
             p = tronco.with_suffix(".md")
@@ -475,7 +647,7 @@ class TranscriptorApp:
             "",
             "## Texto completo",
             "",
-            texto,
+            envolver_texto(texto),
             "",
             "## Segmentos",
             "",
@@ -557,6 +729,9 @@ class TranscriptorApp:
         self.log.config(state="disabled")
 
     def _cerrar(self):
+        if self.grabando:
+            self.grabando = False
+            self._cerrar_grabador()
         self._snapshot_config()
         for d in self.temp_dirs:
             shutil.rmtree(d, ignore_errors=True)

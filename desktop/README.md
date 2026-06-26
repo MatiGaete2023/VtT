@@ -39,12 +39,31 @@ en tu equipo. A partir de ahí funciona **sin conexión**.
 ## ¿Qué hace?
 
 - Transcribe `.mp3 .wav .m4a .ogg .flac .mp4 .aac .wma .opus .webm .mkv .avi`.
+- **Graba desde el micrófono / entrada de audio** y agrega la grabación para transcribir.
 - Descarga audio de YouTube (pega la URL) para transcribirlo.
 - Modelos: `tiny`, `base`, `small`, `medium`, `large-v3` (más grande = más preciso y más lento).
 - Idiomas: español, inglés, portugués, francés o detección automática.
-- Exporta a `.txt`, `.md` (Obsidian), `.srt` y `.vtt`.
+- Exporta a `.txt`, `.md` (Obsidian), `.srt` y `.vtt`. El `.txt` viene **ajustado a
+  ~100 caracteres por línea**, para leerlo sin desplazarte hacia el lado.
 - No necesita FFmpeg para transcribir (lo decodifica internamente). FFmpeg solo
   mejora, opcionalmente, las descargas de YouTube.
+
+## Grabar desde el micrófono / entrada de audio
+
+En el panel **"Grabar desde micrófono / entrada de audio"**:
+
+1. Elige la **Entrada** (tu micrófono, una interfaz, línea de entrada…). "Predeterminada"
+   usa el micrófono por defecto del sistema.
+2. Pulsa **● Grabar**. El tiempo va avanzando y el audio se escribe a disco mientras grabas.
+3. Pulsa **■ Detener**. La grabación (`grabacion_AAAAMMDD_HHMMSS.wav`) se guarda en la
+   carpeta de salida (o en una temporal) y **se agrega sola** a la lista para transcribir.
+
+> Graba **directamente desde la entrada** (no desde el parlante/salida), así que funciona
+> aunque tengas el PC en silencio o con audífonos. Se graba en mono a 16 kHz (ideal para Whisper).
+
+> **Importante:** la grabación usa el paquete `sounddevice`. Si ya tenías la app instalada
+> de antes, actualiza una vez con **`python run.py --update`**. En **Linux** instala también
+> PortAudio: `sudo apt install libportaudio2`.
 
 ## Llevarlo a otro equipo sin descargar de nuevo
 
@@ -66,4 +85,6 @@ desde la pestaña **Actions** del repositorio y descarga el artefacto de tu sist
 | "Python no se reconoce" (Windows) | Reinstala Python marcando **Add Python to PATH**. |
 | Error al crear `.venv` (Linux) | `sudo apt install python3-venv python3-tk` |
 | No abre la ventana (Linux) | Falta Tkinter: `sudo apt install python3-tk` |
+| "Falta el módulo sounddevice" al grabar | Ejecuta `python run.py --update`. En Linux: `sudo apt install libportaudio2`. |
+| No aparece mi micrófono en "Entrada" | Conéctalo antes de abrir la app y reiníciala; revisa los permisos de micrófono del sistema. |
 | La primera transcripción tarda | Está descargando el modelo una sola vez; luego es rápido. |

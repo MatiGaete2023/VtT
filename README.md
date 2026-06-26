@@ -60,7 +60,8 @@ android/                 App Android nativa (Kotlin + whisper.cpp vía JNI)
 
 - Modelos Whisper: `tiny`, `base`, `small` (y en PC también `medium`, `large-v3`).
 - Idiomas: español, inglés, portugués, francés y detección automática.
-- PC: exporta `.txt`, `.md`, `.srt`, `.vtt`; además descarga audio de YouTube.
+- PC: graba desde el micrófono/entrada, exporta `.txt` (con líneas ajustadas para leer
+  sin scroll horizontal), `.md`, `.srt`, `.vtt`; además descarga audio de YouTube.
 - Android: transcribe archivos del teléfono y permite copiar/compartir el texto.
 
 ## Créditos
