@@ -48,25 +48,34 @@ en tu equipo. A partir de ahí funciona **sin conexión**.
 - No necesita FFmpeg para transcribir (lo decodifica internamente). FFmpeg solo
   mejora, opcionalmente, las descargas de YouTube.
 
-## Grabar desde el micrófono / entrada de audio
+## Grabar micrófono o audio del sistema (Chrome, apps, etc.)
 
-En el panel **"Grabar desde micrófono / entrada de audio"**:
+La lista **Entrada** muestra dos tipos de fuentes:
 
-1. Elige la **Entrada** (tu micrófono, una interfaz, línea de entrada…). "Predeterminada"
-   usa el micrófono por defecto del sistema.
-2. Pulsa **● Grabar**. El tiempo va avanzando y el audio se escribe a disco mientras grabas.
-3. **Mira la barra "Nivel"**: debe moverse cuando hablas. Si se queda casi quieta, esa entrada
-   no está captando tu voz → pulsa **■ Detener** y prueba con otra **Entrada** de la lista.
-4. Pulsa **■ Detener**. La grabación (`grabacion_AAAAMMDD_HHMMSS.wav`) se guarda en la
-   carpeta de salida (o en una temporal) y **se agrega sola** a la lista para transcribir.
+- 🎤 **Micrófono / línea** — tu voz, instrumentos, etc.
+- 🔊 **Captura de sistema** — lo que suena en el PC (Chrome, Spotify, videollamadas…)
 
-> Graba **directamente desde la entrada** (no desde el parlante/salida), así que funciona
-> aunque tengas el PC en silencio o con audífonos. Graba a la frecuencia nativa del
-> dispositivo y la mezcla a mono; Whisper la remuestrea solo.
+**Cómo usarlo:**
 
-> **La primera vez que grabes**, si falta el componente `sounddevice`, la app te ofrece
-> **instalarlo en el acto** (un clic, sin cerrar la app). En **Linux** necesitas además la
-> librería del sistema PortAudio: `sudo apt install libportaudio2` (una sola vez).
+1. Elige la **Entrada** adecuada:
+   - Para grabar tu voz: elige tu micrófono (o deja "Predeterminada").
+   - Para grabar lo que suena en el PC: elige la opción con 🔊.
+2. Pulsa **● Grabar**.
+3. **Mira la barra "Nivel"**: debe moverse cuando hay audio. Si no sube, elige otra Entrada.
+4. Pulsa **■ Detener**. El archivo WAV se guarda y se agrega solo a la lista.
+
+> Graba a la frecuencia nativa del dispositivo y mezcla a mono internamente; Whisper remuestrea solo.
+
+### Captura de audio del sistema por plataforma
+
+| Plataforma | Soporte | Cómo |
+|---|---|---|
+| **Windows 10/11** | ✅ Nativo (WASAPI loopback) | Elige `🔊 … (captura sistema)` en la lista. No se instala nada extra. |
+| **Linux** | ✅ Nativo (PulseAudio / PipeWire) | Elige `🔊 Monitor of …` en la lista. Si no aparece: `pactl load-module module-loopback`. |
+| **macOS** | ⚠️ Requiere driver virtual | Instala [BlackHole](https://existential.audio/blackhole/) (gratis) y selecciónalo como dispositivo de salida en preferencias de sonido; aparecerá en la lista como entrada. |
+
+> **La primera vez que grabes**, si falta el componente `sounddevice`, la app lo instala
+> automáticamente con un clic. En Linux necesitas además: `sudo apt install libportaudio2`.
 
 ## Llevarlo a otro equipo sin descargar de nuevo
 
@@ -89,7 +98,9 @@ desde la pestaña **Actions** del repositorio y descarga el artefacto de tu sist
 | Error al crear `.venv` (Linux) | `sudo apt install python3-venv python3-tk` |
 | No abre la ventana (Linux) | Falta Tkinter: `sudo apt install python3-tk` |
 | "Falta el componente sounddevice" al grabar | Acepta el aviso para instalarlo en el acto. En Linux instala además: `sudo apt install libportaudio2`. |
-| La barra **Nivel** no se mueve al hablar | Esa entrada no capta tu voz: elige otra **Entrada** de la lista; revisa los permisos de micrófono del sistema y que no esté silenciado. |
-| La grabación suena vacía o solo con ruido bajo | Mientras grabas, comprueba que la barra **Nivel** sube al hablar; si no, cambia de **Entrada**. |
-| No aparece mi micrófono en "Entrada" | Conéctalo antes de abrir la app y reiníciala; revisa los permisos de micrófono del sistema. |
+| La barra **Nivel** no se mueve | Elige otra **Entrada**; comprueba que el dispositivo no esté silenciado y que tienes permisos de micrófono. |
+| No aparece "captura sistema" en la lista (Windows) | Requiere Windows 10 build 2004+. Asegúrate de que `sounddevice>=0.4.6` está instalado. |
+| No aparece "Monitor of …" en la lista (Linux) | Ejecuta `pactl load-module module-loopback` y reinicia la app. |
+| En macOS no hay opción de captura de sistema | Instala [BlackHole](https://existential.audio/blackhole/) y configúralo como salida de audio. |
+| No aparece mi micrófono en la lista | Conéctalo antes de abrir la app y reiníciala; revisa los permisos de micrófono del sistema. |
 | La primera transcripción tarda | Está descargando el modelo una sola vez; luego es rápido. |

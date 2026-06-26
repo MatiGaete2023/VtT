@@ -215,7 +215,10 @@ class TranscriptorApp:
         self.cmb_dev = ttk.Combobox(fr_rec, state="readonly", width=32)
         self.cmb_dev.pack(side="left", padx=(4, 8))
         self.entradas = self._dispositivos_entrada()
-        self.cmb_dev["values"] = ["Predeterminada"] + [n for _, n in self.entradas]
+        self.cmb_dev["values"] = (
+            ["🎤 Predeterminada (micrófono)"]
+            + [lbl for _, lbl, _, _ in self.entradas]
+        )
         self.cmb_dev.current(0)
         self.btn_grab = ttk.Button(fr_rec, text="●  Grabar", command=self._toggle_grabar)
         self.btn_grab.pack(side="left")
@@ -411,26 +414,65 @@ class TranscriptorApp:
         except Exception:
             self.cola.put(("yt_err", traceback.format_exc()))
 
-    # ----- Grabacion desde el microfono / entrada de audio -----
+    # ----- Grabacion desde el microfono / entrada de audio / sistema -----
     def _dispositivos_entrada(self):
-        """Lista los dispositivos de ENTRADA (microfono, linea), no la salida."""
+        """Lista entradas reales (microfono, linea) Y capturas de audio del sistema.
+
+        Devuelve lista de tuplas: (idx_dispositivo, etiqueta, is_loopback, max_canales).
+          - is_loopback=False  -> entrada real (microfono/linea)
+          - is_loopback=True   -> captura de salida de sistema (WASAPI loopback, Windows)
+        En Linux, las fuentes 'monitor' de PulseAudio/PipeWire ya aparecen como
+        entradas normales (is_loopback=False) y se etiquetan con el icono 🔊.
+        """
         try:
             import sounddevice as sd
-            devs = sd.query_devices()
-            return [(i, d["name"]) for i, d in enumerate(devs)
-                    if d.get("max_input_channels", 0) > 0]
         except Exception:
             return []
 
+        resultado = []
+        try:
+            devs = sd.query_devices()
+        except Exception:
+            return []
+
+        # --- Entradas reales (micrófonos, líneas, monitores de PulseAudio/PipeWire) ---
+        for i, d in enumerate(devs):
+            if d.get("max_input_channels", 0) > 0:
+                name = d["name"]
+                is_mon = "monitor" in name.lower()
+                icono = "🔊" if is_mon else "🎤"
+                label = f"{icono} {name}"
+                resultado.append((i, label, False, d["max_input_channels"]))
+
+        # --- Windows: WASAPI loopback (captura de lo que suena en el PC) ---
+        if sys.platform.startswith("win"):
+            try:
+                apis = sd.query_hostapis()
+                wasapi = next((i for i, a in enumerate(apis)
+                               if "WASAPI" in a.get("name", "")), None)
+                if wasapi is not None:
+                    for i, d in enumerate(devs):
+                        if (d.get("hostapi") == wasapi
+                                and d.get("max_output_channels", 0) > 0):
+                            ch = d["max_output_channels"]
+                            label = f"🔊 {d['name']} (captura sistema)"
+                            resultado.append((i, label, True, ch))
+            except Exception:
+                pass
+
+        return resultado
+
     def _dev_seleccionado(self):
+        """Devuelve (idx, is_loopback, max_canales) o None (predeterminado del sistema)."""
         try:
             sel = self.cmb_dev.current()
         except Exception:
             sel = 0
         if sel <= 0:
-            return None  # entrada predeterminada del sistema
+            return None
         try:
-            return self.entradas[sel - 1][0]
+            idx, _lbl, is_loopback, max_ch = self.entradas[sel - 1]
+            return (idx, is_loopback, max_ch)
         except Exception:
             return None
 
@@ -500,19 +542,32 @@ class TranscriptorApp:
             return
         import numpy as np
 
-        dev = self._dev_seleccionado()
-        # Graba a la frecuencia NATIVA del dispositivo (sin forzar conversiones en
-        # PortAudio, que en algunos equipos producían ruido). Whisper remuestrea solo.
+        sel = self._dev_seleccionado()
+        if sel is None:
+            dev_idx, is_loopback, max_ch = None, False, 1
+        else:
+            dev_idx, is_loopback, max_ch = sel
+
+        # Obtener la frecuencia nativa del dispositivo para evitar conversiones
+        # de PortAudio que en algunos equipos producen ruido.
         try:
-            info = sd.query_devices(dev, "input") if dev is not None \
-                else sd.query_devices(kind="input")
-            rate = int(info.get("default_samplerate") or 0) or 44100
-            max_ch = int(info.get("max_input_channels") or 1) or 1
+            if is_loopback:
+                # Para WASAPI loopback el idx referencia un dispositivo de salida.
+                info = sd.query_devices(dev_idx)
+                rate = int(info.get("default_samplerate") or 0) or 48000
+                max_ch = int(info.get("max_output_channels") or 2) or 2
+            elif dev_idx is not None:
+                info = sd.query_devices(dev_idx, "input")
+                rate = int(info.get("default_samplerate") or 0) or 44100
+                max_ch = int(info.get("max_input_channels") or 1) or 1
+            else:
+                info = sd.query_devices(kind="input")
+                rate = int(info.get("default_samplerate") or 0) or 44100
+                max_ch = int(info.get("max_input_channels") or 1) or 1
         except Exception:
-            rate, max_ch = 44100, 1
-        canales = 1 if max_ch >= 1 else max_ch
-        # Algunas entradas no admiten mono: si abrir con 1 canal falla, usamos los
-        # que tenga y los mezclamos a mono nosotros.
+            rate = 48000 if is_loopback else 44100
+
+        canales = min(2, max_ch)  # Preferimos estéreo para sistema; mono para micro
 
         base = self.v_out.get().strip()
         if base and os.path.isdir(base):
@@ -525,15 +580,13 @@ class TranscriptorApp:
 
         self.cola_grab = queue.Queue()
         self.nivel_grab = 0.0
-        # Descarta el primer ~120 ms (transitorio/pop de arranque del micrófono).
+        # Descarta el primer ~120 ms (transitorio/pop de arranque).
         self.grab_descarta = int(rate * 0.12)
 
         def callback(indata, frames, tinfo, status):
             try:
-                # Nivel de entrada (pico) para el medidor visual.
                 pico = float(np.abs(indata).max()) / 32768.0
                 self.nivel_grab = pico
-                # Mezcla a mono si llegaran varios canales.
                 mono = indata if indata.ndim == 1 or indata.shape[1] == 1 \
                     else indata.mean(axis=1)
                 mono = np.asarray(mono, dtype=np.int16)
@@ -542,20 +595,30 @@ class TranscriptorApp:
                 pass
 
         def abrir(ch):
-            return sd.InputStream(samplerate=rate, channels=ch, dtype="int16",
-                                  device=dev, blocksize=0, callback=callback)
+            kwargs = dict(samplerate=rate, channels=ch, dtype="int16",
+                          device=dev_idx, blocksize=0, callback=callback)
+            if is_loopback:
+                # WASAPI loopback: captura lo que produce el dispositivo de salida.
+                try:
+                    kwargs["extra_settings"] = sd.WasapiSettings(loopback=True)
+                except AttributeError:
+                    pass  # versión antigua de sounddevice sin WasapiSettings
+            return sd.InputStream(**kwargs)
+
         try:
             self.grabador = abrir(canales)
         except Exception:
             try:
-                canales = max_ch
-                self.grabador = abrir(canales)
+                self.grabador = abrir(1)   # reintento con mono
             except Exception:
                 self.grabador = None
                 messagebox.showerror(
                     "Grabación",
-                    "No se pudo abrir el dispositivo de entrada seleccionado.\n"
-                    "Prueba con otra 'Entrada' de la lista.")
+                    "No se pudo abrir el dispositivo seleccionado.\n\n"
+                    "• Si elegiste 'captura sistema' en Windows, asegúrate de que\n"
+                    "  el dispositivo esté activo y PortAudio use WASAPI.\n"
+                    "• En macOS instala BlackHole para capturar audio del sistema.\n"
+                    "• Prueba con otra entrada de la lista.")
                 return
 
         try:
@@ -568,7 +631,6 @@ class TranscriptorApp:
             messagebox.showerror("Grabación", "No se pudo crear el archivo de grabación.")
             return
 
-        # Hilo escritor: vuelca la cola al .wav (desacopla el audio en tiempo real del disco).
         self.grab_stop = threading.Event()
         self.t_writer = threading.Thread(target=self._writer_grab, daemon=True)
         self.t_writer.start()
@@ -582,10 +644,11 @@ class TranscriptorApp:
         self.grabando = True
         self.t_grab_inicio = time.time()
         self.btn_grab.config(text="■  Detener")
-        self._escribe(f"Grabando desde la entrada ({rate} Hz, {canales} canal/es) "
-                      f"-> {Path(self.ruta_grab).name}")
-        self.lbl_st.config(text="Grabando… habla y observa el medidor de Nivel.",
-                           foreground="gray")
+        tipo = "sistema (loopback)" if is_loopback else "entrada"
+        self._escribe(f"Grabando {tipo} a {rate} Hz -> {Path(self.ruta_grab).name}")
+        self.lbl_st.config(
+            text="Grabando… observa el medidor de Nivel. Si no sube, elige otra Entrada.",
+            foreground="gray")
         self._tick_grab()
 
     def _writer_grab(self):
