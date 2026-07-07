@@ -27,14 +27,16 @@ macOS y Linux, **sin permisos de administrador**.
 La primera vez, el lanzador:
 
 1. Crea un entorno aislado (`.venv`) dentro de la carpeta.
-2. Descarga **solo** las dependencias necesarias (`faster-whisper`, `yt-dlp`).
+2. Descarga **solo** las dependencias necesarias (ver `requirements.txt`).
 3. Abre la aplicación.
 
 La **primera transcripción** descarga una vez el modelo de voz elegido y lo guarda
 en tu equipo. A partir de ahí funciona **sin conexión**.
 
-> Las siguientes veces ya no se descarga nada: el programa abre directo.
-> Para actualizar las dependencias en el futuro: `python run.py --update`.
+> Las siguientes veces ya no se descarga nada: el programa abre directo. **Si se agrega
+> una dependencia nueva** (por ejemplo al actualizar la app), el lanzador lo detecta
+> solo comparando `requirements.txt` y la instala automáticamente — no necesitas hacer
+> nada manual. `python run.py --update` fuerza la reinstalación completa igualmente.
 
 ## ¿Qué hace?
 
@@ -64,18 +66,34 @@ La lista **Entrada** muestra dos tipos de fuentes:
 3. **Mira la barra "Nivel"**: debe moverse cuando hay audio. Si no sube, elige otra Entrada.
 4. Pulsa **■ Detener**. El archivo WAV se guarda y se agrega solo a la lista.
 
-> Graba a la frecuencia nativa del dispositivo y mezcla a mono internamente; Whisper remuestrea solo.
+> Graba a la frecuencia nativa del dispositivo (o 48 kHz para audio de sistema) y mezcla
+> a mono internamente; Whisper remuestrea solo.
 
 ### Captura de audio del sistema por plataforma
 
 | Plataforma | Soporte | Cómo |
 |---|---|---|
-| **Windows 10/11** | ✅ Nativo (WASAPI loopback) | Elige `🔊 … (captura sistema)` en la lista. No se instala nada extra. |
+| **Windows 10/11** | ✅ Nativo (WASAPI loopback vía librería `soundcard`) | Elige `🔊 … (audio del sistema)` en la lista. La primera vez la app ofrece instalar `soundcard` con un clic. |
 | **Linux** | ✅ Nativo (PulseAudio / PipeWire) | Elige `🔊 Monitor of …` en la lista. Si no aparece: `pactl load-module module-loopback`. |
 | **macOS** | ⚠️ Requiere driver virtual | Instala [BlackHole](https://existential.audio/blackhole/) (gratis) y selecciónalo como dispositivo de salida en preferencias de sonido; aparecerá en la lista como entrada. |
 
-> **La primera vez que grabes**, si falta el componente `sounddevice`, la app lo instala
-> automáticamente con un clic. En Linux necesitas además: `sudo apt install libportaudio2`.
+> **La primera vez que grabes**, si falta algún componente (`sounddevice` para
+> micrófono, `soundcard` para audio de sistema en Windows), la app lo instala **en
+> segundo plano con un clic**, sin congelar la ventana. En Linux necesitas además:
+> `sudo apt install libportaudio2`.
+
+## Dónde quedan las grabaciones y transcripciones
+
+Si no eliges una **carpeta de salida**, la app NUNCA guarda en carpetas temporales que
+se borran al cerrar:
+
+- Las **grabaciones** (micrófono o sistema) quedan en `desktop/grabaciones/`.
+- Las **transcripciones** de audios descargados de YouTube (sin carpeta de salida
+  elegida) quedan en `desktop/transcripciones/`.
+- Las transcripciones de un archivo que ya tenías en el disco se guardan junto a ese
+  archivo, como siempre.
+
+Ambas carpetas se crean solas junto al programa y no se suben al repositorio.
 
 ## Llevarlo a otro equipo sin descargar de nuevo
 
@@ -97,9 +115,9 @@ desde la pestaña **Actions** del repositorio y descarga el artefacto de tu sist
 | "Python no se reconoce" (Windows) | Reinstala Python marcando **Add Python to PATH**. |
 | Error al crear `.venv` (Linux) | `sudo apt install python3-venv python3-tk` |
 | No abre la ventana (Linux) | Falta Tkinter: `sudo apt install python3-tk` |
-| "Falta el componente sounddevice" al grabar | Acepta el aviso para instalarlo en el acto. En Linux instala además: `sudo apt install libportaudio2`. |
+| "Falta el componente sounddevice/soundcard" al grabar | Acepta el aviso para instalarlo en el acto (se hace en segundo plano). En Linux instala además: `sudo apt install libportaudio2`. |
 | La barra **Nivel** no se mueve | Elige otra **Entrada**; comprueba que el dispositivo no esté silenciado y que tienes permisos de micrófono. |
-| No aparece "captura sistema" en la lista (Windows) | Requiere Windows 10 build 2004+. Asegúrate de que `sounddevice>=0.4.6` está instalado. |
+| No aparece "audio del sistema" en la lista (Windows) | Requiere Windows 10 build 2004+ (WASAPI). La entrada genérica aparece igual y ofrece instalar `soundcard` al usarla. |
 | No aparece "Monitor of …" en la lista (Linux) | Ejecuta `pactl load-module module-loopback` y reinicia la app. |
 | En macOS no hay opción de captura de sistema | Instala [BlackHole](https://existential.audio/blackhole/) y configúralo como salida de audio. |
 | No aparece mi micrófono en la lista | Conéctalo antes de abrir la app y reiníciala; revisa los permisos de micrófono del sistema. |

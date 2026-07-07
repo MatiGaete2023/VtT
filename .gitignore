@@ -6,6 +6,8 @@ desktop/build/
 desktop/dist/
 desktop/*.spec
 transcriptor_config.json
+desktop/grabaciones/
+desktop/transcripciones/
 
 # ---- Android / Gradle ----
 android/.gradle/

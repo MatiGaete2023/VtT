@@ -46,7 +46,7 @@ Detalles: [`android/README.md`](android/README.md).
 desktop/                 App de escritorio (Tkinter + faster-whisper) y auto-instalador
   transcriptor_whisper.py  La aplicación (multiplataforma)
   run.py                   Lanzador que auto-instala dependencias en un entorno local
-  requirements.txt         Dependencias (faster-whisper, yt-dlp)
+  requirements.txt         Dependencias (faster-whisper, yt-dlp, sounddevice, soundcard)
   run.bat / run.sh         Accesos directos para Windows / macOS / Linux
 android/                 App Android nativa (Kotlin + whisper.cpp vía JNI)
   app/src/main/cpp/        Puente JNI y CMake (descarga whisper.cpp al compilar)
@@ -60,8 +60,10 @@ android/                 App Android nativa (Kotlin + whisper.cpp vía JNI)
 
 - Modelos Whisper: `tiny`, `base`, `small` (y en PC también `medium`, `large-v3`).
 - Idiomas: español, inglés, portugués, francés y detección automática.
-- PC: graba desde el micrófono/entrada, exporta `.txt` (con líneas ajustadas para leer
-  sin scroll horizontal), `.md`, `.srt`, `.vtt`; además descarga audio de YouTube.
+- PC: graba desde el **micrófono** o desde el **audio del sistema** (lo que suena en
+  Chrome, apps, videollamadas — nativo en Windows/Linux, requiere BlackHole en macOS),
+  exporta `.txt` (con líneas ajustadas para leer sin scroll horizontal), `.md`, `.srt`,
+  `.vtt`; además descarga audio de YouTube.
 - Android: transcribe archivos del teléfono y permite copiar/compartir el texto.
 
 ## Créditos

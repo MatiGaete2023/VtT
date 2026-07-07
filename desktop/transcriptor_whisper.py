@@ -49,6 +49,13 @@ MESES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio",
          "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
 CONFIG_PATH = Path(__file__).parent / "transcriptor_config.json"
 
+# Carpetas persistentes (NUNCA temporales): grabaciones y transcripciones sin carpeta
+# de salida configurada se guardan aqui, para que no se pierdan al cerrar la app.
+CARPETA_GRABACIONES = Path(__file__).parent / "grabaciones"
+CARPETA_TRANSCRIPCIONES = Path(__file__).parent / "transcripciones"
+CARPETA_GRABACIONES.mkdir(exist_ok=True)
+CARPETA_TRANSCRIPCIONES.mkdir(exist_ok=True)
+
 # Paleta moderna (violeta vibrante + superficies claras), minimalista.
 PALETA = {
     "bg": "#F4F2FB",
@@ -173,8 +180,9 @@ class TranscriptorApp:
         self.ruta_grab = None
         self.entradas = []
         self.cola_grab = None        # cola de bloques PCM (callback -> hilo escritor)
-        self.grab_stop = None        # evento para detener el hilo escritor
+        self.grab_stop = None        # evento para detener el hilo escritor y el de captura
         self.t_writer = None         # hilo que vuelca la cola al .wav
+        self.t_captura = None        # hilo de captura para audio de sistema (soundcard)
         self.nivel_grab = 0.0        # nivel de entrada (0..1) para el medidor
         self.grab_descarta = 0       # bloques a descartar al inicio (transitorio)
 
@@ -212,7 +220,7 @@ class TranscriptorApp:
         fr_rec = ttk.LabelFrame(cont, text="Grabar desde micrófono / entrada de audio", padding=8)
         fr_rec.pack(fill="x", **pad)
         ttk.Label(fr_rec, text="Entrada:").pack(side="left")
-        self.cmb_dev = ttk.Combobox(fr_rec, state="readonly", width=32)
+        self.cmb_dev = ttk.Combobox(fr_rec, state="readonly", width=48)
         self.cmb_dev.pack(side="left", padx=(4, 8))
         self.entradas = self._dispositivos_entrada()
         self.cmb_dev["values"] = (
@@ -418,52 +426,58 @@ class TranscriptorApp:
     def _dispositivos_entrada(self):
         """Lista entradas reales (microfono, linea) Y capturas de audio del sistema.
 
-        Devuelve lista de tuplas: (idx_dispositivo, etiqueta, is_loopback, max_canales).
-          - is_loopback=False  -> entrada real (microfono/linea)
-          - is_loopback=True   -> captura de salida de sistema (WASAPI loopback, Windows)
-        En Linux, las fuentes 'monitor' de PulseAudio/PipeWire ya aparecen como
-        entradas normales (is_loopback=False) y se etiquetan con el icono 🔊.
+        Devuelve una lista de tuplas (origen, id, etiqueta, is_loopback, max_canales):
+          - origen "sd": dispositivo de sounddevice/PortAudio (microfono, linea,
+            o monitor de PulseAudio/PipeWire en Linux). 'id' es su indice entero.
+          - origen "sc": fuente de audio de SISTEMA vía la libreria 'soundcard'
+            (WASAPI loopback en Windows). 'id' es el id de dispositivo de soundcard,
+            o None si aun no esta instalada (entrada generica que la instala al usarla).
         """
+        resultado = []
+
         try:
             import sounddevice as sd
-        except Exception:
-            return []
-
-        resultado = []
-        try:
             devs = sd.query_devices()
+            apis = sd.query_hostapis()
         except Exception:
-            return []
+            devs, apis = [], []
 
-        # --- Entradas reales (micrófonos, líneas, monitores de PulseAudio/PipeWire) ---
+        # En Windows, PortAudio expone el mismo microfono varias veces (MME,
+        # DirectSound, WASAPI, WDM-KS). Nos quedamos solo con WASAPI para no
+        # duplicar la lista y para evitar los backends antiguos mas propensos
+        # a fallar.
+        wasapi_idx = None
+        if sys.platform.startswith("win"):
+            wasapi_idx = next((i for i, a in enumerate(apis)
+                               if "WASAPI" in a.get("name", "")), None)
+
         for i, d in enumerate(devs):
-            if d.get("max_input_channels", 0) > 0:
-                name = d["name"]
-                is_mon = "monitor" in name.lower()
-                icono = "🔊" if is_mon else "🎤"
-                label = f"{icono} {name}"
-                resultado.append((i, label, False, d["max_input_channels"]))
+            if d.get("max_input_channels", 0) <= 0:
+                continue
+            if wasapi_idx is not None and d.get("hostapi") != wasapi_idx:
+                continue
+            name = d["name"]
+            is_mon = "monitor" in name.lower()
+            icono = "🔊" if is_mon else "🎤"
+            resultado.append(("sd", i, f"{icono} {name}", is_mon, d["max_input_channels"]))
 
-        # --- Windows: WASAPI loopback (captura de lo que suena en el PC) ---
+        # --- Windows: captura de audio del sistema (Chrome, apps, etc.) vía soundcard ---
         if sys.platform.startswith("win"):
             try:
-                apis = sd.query_hostapis()
-                wasapi = next((i for i, a in enumerate(apis)
-                               if "WASAPI" in a.get("name", "")), None)
-                if wasapi is not None:
-                    for i, d in enumerate(devs):
-                        if (d.get("hostapi") == wasapi
-                                and d.get("max_output_channels", 0) > 0):
-                            ch = d["max_output_channels"]
-                            label = f"🔊 {d['name']} (captura sistema)"
-                            resultado.append((i, label, True, ch))
+                import soundcard as sc
+                mics = [m for m in sc.all_microphones(include_loopback=True) if m.isloopback]
+                for m in mics:
+                    ch = m.channels or 2
+                    resultado.append(("sc", m.id, f"🔊 {m.name} (audio del sistema)", True, ch))
             except Exception:
-                pass
+                # 'soundcard' aun no instalada: entrada generica que la instala al usarla.
+                resultado.append(
+                    ("sc", None, "🔊 Audio del sistema (todo lo que suena en el PC)", True, 2))
 
         return resultado
 
     def _dev_seleccionado(self):
-        """Devuelve (idx, is_loopback, max_canales) o None (predeterminado del sistema)."""
+        """Devuelve (origen, id, etiqueta, is_loopback, max_canales) o None (predeterminado)."""
         try:
             sel = self.cmb_dev.current()
         except Exception:
@@ -471,8 +485,7 @@ class TranscriptorApp:
         if sel <= 0:
             return None
         try:
-            idx, _lbl, is_loopback, max_ch = self.entradas[sel - 1]
-            return (idx, is_loopback, max_ch)
+            return self.entradas[sel - 1]
         except Exception:
             return None
 
@@ -482,106 +495,155 @@ class TranscriptorApp:
         else:
             self._iniciar_grabacion()
 
-    def _asegurar_sounddevice(self):
-        """Importa sounddevice; si falta, ofrece instalarlo en el acto (sin reiniciar).
+    def _asegurar_modulo_async(self, modulo, paquete_pip, nombre_visible, on_listo):
+        """Importa `modulo` y llama on_listo(modulo_o_None).
 
-        Devuelve el módulo sounddevice o None. Maneja el caso de Linux sin
-        PortAudio (libportaudio2) con un mensaje claro."""
+        Si falta, ofrece instalarlo en el acto SIN bloquear la interfaz: el
+        `pip install` corre en un hilo aparte y on_listo se invoca cuando
+        termina (desde el hilo de Tk, vía la cola de eventos existente)."""
         try:
-            import sounddevice as sd
-            return sd
+            on_listo(__import__(modulo))
+            return
         except OSError:
-            # El módulo está, pero falta la librería nativa PortAudio (típico en Linux).
+            # El paquete de Python esta, pero falta una libreria nativa del sistema.
             messagebox.showerror(
                 "Grabación",
-                "El sistema no tiene la librería de audio PortAudio.\n\n"
+                f"Falta una librería de audio del sistema para '{nombre_visible}'.\n\n"
                 "En Linux instálala una vez con:\n"
                 "    sudo apt install libportaudio2\n\n"
                 "(En Windows y macOS no hace falta: viene incluida.)")
-            return None
+            on_listo(None)
+            return
         except Exception:
             pass
 
-        # Falta el paquete: ofrecer instalarlo automáticamente en este mismo entorno.
         if not messagebox.askyesno(
                 "Instalar grabación",
-                "Para grabar falta el componente 'sounddevice'.\n\n"
+                f"Para grabar falta el componente '{nombre_visible}'.\n\n"
                 "¿Quieres que lo instale ahora automáticamente?\n"
                 "(Solo se hace una vez; no necesitas cerrar la app.)"):
-            return None
-        self.lbl_st.config(text="Instalando componente de grabación…", foreground="gray")
-        self._escribe("Instalando 'sounddevice' (solo la primera vez)…")
-        self.root.update_idletasks()
-        try:
-            subprocess.check_call(
-                [sys.executable, "-m", "pip", "install", "--quiet", "sounddevice"])
-        except Exception:
+            on_listo(None)
+            return
+        if getattr(sys, "frozen", False):
             messagebox.showerror(
                 "Grabación",
-                "No se pudo instalar 'sounddevice' automáticamente.\n\n"
+                "Esta versión (ejecutable independiente) no puede instalar\n"
+                "componentes nuevos. Usa la versión de 'python run.py' para grabar.")
+            on_listo(None)
+            return
+
+        self.btn_grab.config(state="disabled")
+        self.lbl_st.config(text=f"Instalando '{nombre_visible}'…", foreground="gray")
+        self._escribe(f"Instalando '{nombre_visible}' (solo la primera vez)…")
+
+        def trabajo():
+            try:
+                subprocess.check_call(
+                    [sys.executable, "-m", "pip", "install", "--quiet", paquete_pip])
+                ok = True
+            except Exception:
+                ok = False
+            self.cola.put(("dep_instalada", (modulo, nombre_visible, ok, on_listo)))
+
+        threading.Thread(target=trabajo, daemon=True).start()
+
+    def _dep_instalada(self, modulo, nombre_visible, ok, on_listo):
+        """Se ejecuta en el hilo de Tk cuando termina la instalación en segundo plano."""
+        self.btn_grab.config(state="normal")
+        if not ok:
+            messagebox.showerror(
+                "Grabación",
+                f"No se pudo instalar '{nombre_visible}' automáticamente.\n\n"
                 "Cierra la app y ejecuta:  python run.py --update")
-            return None
+            on_listo(None)
+            return
         try:
-            import sounddevice as sd
+            mod = __import__(modulo)
             self._escribe("Componente de grabación instalado.")
-            return sd
+            self.lbl_st.config(text="Listo.", foreground="gray")
+            on_listo(mod)
         except OSError:
             messagebox.showerror(
                 "Grabación",
-                "Falta la librería PortAudio del sistema.\n"
+                "Falta una librería de audio del sistema.\n"
                 "En Linux:  sudo apt install libportaudio2")
-            return None
+            on_listo(None)
         except Exception:
             messagebox.showerror("Grabación",
                                  "No se pudo activar la grabación. Reinicia la app.")
-            return None
+            on_listo(None)
 
-    def _iniciar_grabacion(self):
-        sd = self._asegurar_sounddevice()
-        if sd is None:
-            return
-        import numpy as np
-
-        sel = self._dev_seleccionado()
-        if sel is None:
-            dev_idx, is_loopback, max_ch = None, False, 1
-        else:
-            dev_idx, is_loopback, max_ch = sel
-
-        # Obtener la frecuencia nativa del dispositivo para evitar conversiones
-        # de PortAudio que en algunos equipos producen ruido.
-        try:
-            if is_loopback:
-                # Para WASAPI loopback el idx referencia un dispositivo de salida.
-                info = sd.query_devices(dev_idx)
-                rate = int(info.get("default_samplerate") or 0) or 48000
-                max_ch = int(info.get("max_output_channels") or 2) or 2
-            elif dev_idx is not None:
-                info = sd.query_devices(dev_idx, "input")
-                rate = int(info.get("default_samplerate") or 0) or 44100
-                max_ch = int(info.get("max_input_channels") or 1) or 1
-            else:
-                info = sd.query_devices(kind="input")
-                rate = int(info.get("default_samplerate") or 0) or 44100
-                max_ch = int(info.get("max_input_channels") or 1) or 1
-        except Exception:
-            rate = 48000 if is_loopback else 44100
-
-        canales = min(2, max_ch)  # Preferimos estéreo para sistema; mono para micro
-
+    def _preparar_grabacion(self, rate):
+        """Crea el archivo .wav destino y arranca el hilo escritor comun a
+        ambos caminos de grabacion (microfono y audio de sistema)."""
         base = self.v_out.get().strip()
         if base and os.path.isdir(base):
             carpeta = base
         else:
-            carpeta = tempfile.mkdtemp(prefix="grab_")
-            self.temp_dirs.append(carpeta)
+            carpeta = str(CARPETA_GRABACIONES)
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         self.ruta_grab = os.path.join(carpeta, f"grabacion_{ts}.wav")
 
         self.cola_grab = queue.Queue()
         self.nivel_grab = 0.0
-        # Descarta el primer ~120 ms (transitorio/pop de arranque).
-        self.grab_descarta = int(rate * 0.12)
+        self.grab_descarta = int(rate * 0.12)  # descarta el pop de arranque (~120 ms)
+
+        try:
+            self.wave_file = wave.open(self.ruta_grab, "wb")
+            self.wave_file.setnchannels(1)
+            self.wave_file.setsampwidth(2)
+            self.wave_file.setframerate(rate)
+        except Exception:
+            self.wave_file = None
+            messagebox.showerror("Grabación", "No se pudo crear el archivo de grabación.")
+            return False
+
+        self.grab_stop = threading.Event()
+        self.t_writer = threading.Thread(target=self._writer_grab, daemon=True)
+        self.t_writer.start()
+        return True
+
+    def _grabacion_iniciada(self, descripcion):
+        self.grabando = True
+        self.t_grab_inicio = time.time()
+        self.btn_grab.config(text="■  Detener")
+        self._escribe(f"Grabando {descripcion} -> {Path(self.ruta_grab).name}")
+        self.lbl_st.config(
+            text="Grabando… observa el medidor de Nivel. Si no sube, elige otra Entrada.",
+            foreground="gray")
+        self._tick_grab()
+
+    def _iniciar_grabacion(self):
+        sel = self._dev_seleccionado()
+        if sel is not None and sel[0] == "sc":
+            self._asegurar_modulo_async(
+                "soundcard", "soundcard", "captura de audio del sistema",
+                lambda mod: self._continuar_grabacion_sistema(sel, mod))
+        else:
+            self._asegurar_modulo_async(
+                "sounddevice", "sounddevice", "sounddevice",
+                lambda mod: self._continuar_grabacion_microfono(sel, mod))
+
+    def _continuar_grabacion_microfono(self, sel, sd):
+        """Graba desde un microfono / linea de entrada real, via sounddevice."""
+        if sd is None:
+            return
+        import numpy as np
+
+        dev_idx = sel[1] if sel is not None else None
+
+        # Frecuencia nativa del dispositivo (evita conversiones de PortAudio que
+        # en algunos equipos producen ruido).
+        hostapi_nombre = "?"
+        try:
+            info = sd.query_devices(dev_idx, "input") if dev_idx is not None \
+                else sd.query_devices(kind="input")
+            rate = int(info.get("default_samplerate") or 0) or 44100
+            max_ch = int(info.get("max_input_channels") or 1) or 1
+            hostapi_nombre = sd.query_hostapis(info.get("hostapi"))["name"]
+        except Exception:
+            rate, max_ch = 44100, 1
+        canales = min(2, max_ch)
 
         def callback(indata, frames, tinfo, status):
             try:
@@ -590,50 +652,30 @@ class TranscriptorApp:
                 mono = indata if indata.ndim == 1 or indata.shape[1] == 1 \
                     else indata.mean(axis=1)
                 mono = np.asarray(mono, dtype=np.int16)
-                self.cola_grab.put(mono.tobytes())
+                self.cola_grab.put(mono.tobytes()) if self.cola_grab is not None else None
             except Exception:
                 pass
 
-        def abrir(ch):
-            kwargs = dict(samplerate=rate, channels=ch, dtype="int16",
-                          device=dev_idx, blocksize=0, callback=callback)
-            if is_loopback:
-                # WASAPI loopback: captura lo que produce el dispositivo de salida.
-                try:
-                    kwargs["extra_settings"] = sd.WasapiSettings(loopback=True)
-                except AttributeError:
-                    pass  # versión antigua de sounddevice sin WasapiSettings
-            return sd.InputStream(**kwargs)
+        if not self._preparar_grabacion(rate):
+            return
 
+        def abrir(ch):
+            return sd.InputStream(samplerate=rate, channels=ch, dtype="int16",
+                                  device=dev_idx, blocksize=0, callback=callback)
         try:
             self.grabador = abrir(canales)
         except Exception:
             try:
-                self.grabador = abrir(1)   # reintento con mono
+                self.grabador = abrir(1)
             except Exception:
                 self.grabador = None
+                self._cerrar_grabador()
                 messagebox.showerror(
                     "Grabación",
-                    "No se pudo abrir el dispositivo seleccionado.\n\n"
-                    "• Si elegiste 'captura sistema' en Windows, asegúrate de que\n"
-                    "  el dispositivo esté activo y PortAudio use WASAPI.\n"
-                    "• En macOS instala BlackHole para capturar audio del sistema.\n"
-                    "• Prueba con otra entrada de la lista.")
+                    "No se pudo abrir el dispositivo seleccionado.\n"
+                    "Prueba con otra 'Entrada' de la lista.")
                 return
 
-        try:
-            self.wave_file = wave.open(self.ruta_grab, "wb")
-            self.wave_file.setnchannels(1)
-            self.wave_file.setsampwidth(2)
-            self.wave_file.setframerate(rate)
-        except Exception:
-            self._cerrar_grabador()
-            messagebox.showerror("Grabación", "No se pudo crear el archivo de grabación.")
-            return
-
-        self.grab_stop = threading.Event()
-        self.t_writer = threading.Thread(target=self._writer_grab, daemon=True)
-        self.t_writer.start()
         try:
             self.grabador.start()
         except Exception:
@@ -641,15 +683,61 @@ class TranscriptorApp:
             messagebox.showerror("Grabación", "No se pudo iniciar la grabación.")
             return
 
-        self.grabando = True
-        self.t_grab_inicio = time.time()
-        self.btn_grab.config(text="■  Detener")
-        tipo = "sistema (loopback)" if is_loopback else "entrada"
-        self._escribe(f"Grabando {tipo} a {rate} Hz -> {Path(self.ruta_grab).name}")
-        self.lbl_st.config(
-            text="Grabando… observa el medidor de Nivel. Si no sube, elige otra Entrada.",
-            foreground="gray")
-        self._tick_grab()
+        self._grabacion_iniciada(
+            f"entrada '{sel[2] if sel else 'predeterminada'}' a {rate} Hz "
+            f"({canales} canal/es, API {hostapi_nombre})")
+
+    def _continuar_grabacion_sistema(self, sel, sc_mod):
+        """Graba el audio que suena en el PC (Chrome, apps, etc.) vía soundcard/WASAPI."""
+        if sc_mod is None:
+            return
+
+        dev_id = sel[1]
+        try:
+            if dev_id is not None:
+                mic = sc_mod.get_microphone(dev_id, include_loopback=True)
+            else:
+                mic = sc_mod.get_microphone(sc_mod.default_speaker().id, include_loopback=True)
+        except Exception:
+            messagebox.showerror(
+                "Grabación",
+                "No se pudo acceder al dispositivo de salida para capturar el sistema.\n"
+                "Prueba con otra entrada de la lista.")
+            return
+
+        rate = 48000  # frecuencia habitual del mezclador WASAPI; Whisper remuestrea igual
+        canales = min(2, mic.channels or 2)
+
+        if not self._preparar_grabacion(rate):
+            return
+
+        self.grab_stop = self.grab_stop or threading.Event()
+        self.t_captura = threading.Thread(
+            target=self._captura_loop_sistema, args=(mic, rate, canales), daemon=True)
+        self.t_captura.start()
+
+        self._grabacion_iniciada(f"audio del sistema ({sel[2]}) a {rate} Hz")
+
+    def _captura_loop_sistema(self, mic, rate, canales):
+        """Hilo dedicado: lee bloques de soundcard (float32) y los encola como PCM16 mono."""
+        import numpy as np
+        bloque = max(1, int(rate * 0.05))  # ~50 ms
+        try:
+            with mic.recorder(samplerate=rate, channels=canales, blocksize=bloque) as rec:
+                while not self.grab_stop.is_set():
+                    data = rec.record(numframes=bloque)
+                    if data is None or data.size == 0:
+                        continue
+                    data = np.asarray(data, dtype=np.float32)
+                    mono_f = data if data.ndim == 1 else data.mean(axis=1)
+                    if mono_f.size == 0:
+                        continue
+                    self.nivel_grab = float(np.abs(mono_f).max())
+                    mono_i16 = np.clip(mono_f * 32767.0, -32768, 32767).astype(np.int16)
+                    if self.cola_grab is not None:
+                        self.cola_grab.put(mono_i16.tobytes())
+        except Exception:
+            pass
 
     def _writer_grab(self):
         """Drena la cola de bloques PCM y los escribe al .wav (hilo aparte)."""
@@ -691,6 +779,7 @@ class TranscriptorApp:
         self.ruta_grab = None
 
     def _cerrar_grabador(self):
+        # 1) Detiene la captura (microfono via PortAudio, o hilo de soundcard).
         try:
             if self.grabador is not None:
                 self.grabador.stop()
@@ -698,10 +787,17 @@ class TranscriptorApp:
         except Exception:
             pass
         self.grabador = None
-        # Detiene el hilo escritor y espera a que vacíe la cola pendiente.
+        if self.grab_stop is not None:
+            self.grab_stop.set()
         try:
-            if self.grab_stop is not None:
-                self.grab_stop.set()
+            if self.t_captura is not None:
+                self.t_captura.join(timeout=2.0)
+        except Exception:
+            pass
+        self.t_captura = None
+
+        # 2) Detiene el hilo escritor y espera a que vacíe la cola pendiente.
+        try:
             if self.cola_grab is not None:
                 self.cola_grab.put(None)
             if self.t_writer is not None:
@@ -760,6 +856,19 @@ class TranscriptorApp:
                 self.v_vad.get(), self.v_words.get())
         threading.Thread(target=self._worker, args=args, daemon=True).start()
 
+    def _es_temporal(self, archivo):
+        """True si `archivo` vive dentro de una carpeta temporal (p.ej. descarga
+        de YouTube) que se borrara al cerrar la app."""
+        try:
+            ruta = Path(archivo).resolve()
+            return any(ruta.is_relative_to(Path(d).resolve()) for d in self.temp_dirs)
+        except AttributeError:
+            # Python < 3.9 no tiene is_relative_to.
+            ruta_s = str(Path(archivo).resolve())
+            return any(ruta_s.startswith(str(Path(d).resolve())) for d in self.temp_dirs)
+        except Exception:
+            return False
+
     def _worker(self, archivos, modelo, idioma, salida, formatos, vad, words):
         try:
             self.cola.put(("log", "Importando faster-whisper (la primera vez puede tardar)..."))
@@ -794,7 +903,15 @@ class TranscriptorApp:
                         self.cola.put(("progress", min(100.0, seg.end / dur * 100)))
                 texto = "".join(partes).strip()
 
-                base = Path(salida) if salida else Path(archivo).parent
+                if salida:
+                    base = Path(salida)
+                elif self._es_temporal(archivo):
+                    # Audio descargado (p.ej. de YouTube): su carpeta es temporal y se
+                    # borra al cerrar la app. Escribimos la transcripcion en un lugar
+                    # persistente para no perderla.
+                    base = CARPETA_TRANSCRIPCIONES
+                else:
+                    base = Path(archivo).parent
                 self.ultima_salida = str(base)
                 escritos = self._escribir_salidas(base, archivo, modelo, idioma, texto, segs, formatos)
                 self.cola.put(("progress", 100))
@@ -892,6 +1009,9 @@ class TranscriptorApp:
                     self.lbl_st.config(text="Cancelado.", foreground="gray")
                 elif tipo == "done":
                     self._finalizar()
+                elif tipo == "dep_instalada":
+                    modulo, nombre_visible, ok, on_listo = p[0]
+                    self._dep_instalada(modulo, nombre_visible, ok, on_listo)
                 elif tipo == "yt_ok":
                     self.bajando_yt = False
                     self.btn_yt.config(state="normal")

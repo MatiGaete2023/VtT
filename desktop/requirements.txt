@@ -6,3 +6,7 @@ yt-dlp>=2024.8.6
 # Grabacion desde el microfono / entrada de audio (PortAudio incluido en las
 # ruedas de Windows/macOS; en Linux instala ademas: sudo apt install libportaudio2).
 sounddevice>=0.4.6
+numpy>=1.24
+# Captura de audio del SISTEMA (Chrome, apps, etc.) en Windows via WASAPI loopback.
+# Solo se usa en Windows; en Linux/macOS se instala igual pero no se activa loopback.
+soundcard>=0.4.2

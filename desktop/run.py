@@ -5,21 +5,24 @@ Lanzador autoinstalable del Transcriptor Whisper.
 
 Solo necesitas tener Python 3.8+ instalado. La primera vez, este script:
   1. Crea un entorno virtual local (.venv) junto a este archivo.
-  2. Instala SOLO las dependencias necesarias (faster-whisper, yt-dlp).
+  2. Instala SOLO las dependencias necesarias (requirements.txt).
   3. Ejecuta la interfaz grafica.
 
-Las siguientes veces no descarga nada: arranca directo (a menos que uses --update).
+Las siguientes veces no descarga nada: arranca directo. Si requirements.txt
+cambio desde la ultima instalacion (por ejemplo, se agrego una dependencia
+nueva), lo detecta solo y reinstala automaticamente, sin pasos manuales.
 El modelo de voz se descarga una unica vez la primera vez que transcribes,
 y queda guardado en el equipo para usarse sin conexion.
 
 Uso:
-    python run.py            # instala (1a vez) y abre la app
-    python run.py --update   # reinstala/actualiza las dependencias
+    python run.py            # instala/actualiza si hace falta y abre la app
+    python run.py --update   # fuerza la reinstalacion de las dependencias
 """
 
 import os
 import sys
 import venv
+import hashlib
 import subprocess
 from pathlib import Path
 
@@ -49,8 +52,25 @@ def crear_venv():
         sys.exit(1)
 
 
+def hash_requirements() -> str:
+    return hashlib.sha256(REQS.read_bytes()).hexdigest()
+
+
+def deps_al_dia() -> bool:
+    """True si ya se instalaron las dependencias de la version ACTUAL de
+    requirements.txt. Si requirements.txt cambio (nueva dependencia agregada
+    como sounddevice/soundcard), el hash no coincide y se reinstala solo."""
+    if not MARKER.exists():
+        return False
+    try:
+        return MARKER.read_text(encoding="utf-8").strip() == hash_requirements()
+    except Exception:
+        return False
+
+
 def instalar_deps(py: Path):
-    print("[2/2] Instalando dependencias (solo la primera vez, requiere internet)...")
+    print("[2/2] Instalando dependencias (requiere internet la primera vez o "
+          "cuando se agregan nuevas)...")
     try:
         subprocess.check_call([str(py), "-m", "pip", "install", "--upgrade", "pip"])
         subprocess.check_call([str(py), "-m", "pip", "install", "-r", str(REQS)])
@@ -58,7 +78,7 @@ def instalar_deps(py: Path):
         print(f"\nError instalando dependencias: {e}")
         print("Revisa tu conexion a internet y vuelve a ejecutar 'python run.py'.")
         sys.exit(1)
-    MARKER.write_text("ok", encoding="utf-8")
+    MARKER.write_text(hash_requirements(), encoding="utf-8")
 
 
 def main():
@@ -78,7 +98,7 @@ def main():
         crear_venv()
         py = venv_python(VENV_DIR)
 
-    if forzar or not MARKER.exists():
+    if forzar or not deps_al_dia():
         instalar_deps(py)
 
     # Lanza la interfaz grafica con el Python del entorno virtual.
