@@ -1,0 +1,51 @@
+name: Desktop checks
+
+# Verificacion rapida de la app de escritorio: sintaxis + pruebas unitarias.
+# NO instala faster-whisper/sounddevice/soundcard (son pesadas y el modulo
+# las importa de forma perezosa, solo dentro de funciones), por eso este
+# workflow corre en segundos en los 3 sistemas operativos.
+on:
+  push:
+    branches:
+      - "claude/voice-transcriber-multiplatform-6xifq1"
+      - "main"
+    paths:
+      - "desktop/**"
+      - ".github/workflows/desktop-check.yml"
+  pull_request:
+    paths:
+      - "desktop/**"
+
+jobs:
+  check:
+    name: py_compile + pytest en ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Instalar Tk (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-tk
+
+      - name: Compilar (verificacion de sintaxis)
+        working-directory: desktop
+        run: python -m py_compile transcriptor_whisper.py run.py
+
+      - name: Instalar pytest
+        run: python -m pip install --upgrade pip pytest
+
+      - name: Ejecutar pruebas
+        working-directory: desktop
+        run: python -m pytest tests -q

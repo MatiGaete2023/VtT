@@ -39,6 +39,10 @@ jobs:
           --collect-all onnxruntime
           --collect-all av
           --collect-all tokenizers
+          --collect-all sounddevice
+          --collect-all soundcard
+          --collect-all numpy
+          --collect-all cffi
           transcriptor_whisper.py
 
       - name: Upload executable
