@@ -37,6 +37,10 @@ No necesitas instalar nada de desarrollo. El APK lo construye GitHub Actions:
 > Puedes rotar la pantalla o cambiar de app durante una transcripción larga: el
 > trabajo sigue en curso y el resultado te espera al volver.
 
+> Si una descarga de modelo se corta (se cierra la app, se pierde la conexión),
+> la próxima vez **reanuda desde donde quedó** en vez de bajarlo de nuevo. Si el
+> archivo terminó corrupto, se detecta solo y se vuelve a descargar.
+
 ## Tamaño de los modelos (se bajan una vez)
 
 | Modelo | Tamaño aprox. | Velocidad | Precisión |
