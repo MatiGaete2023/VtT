@@ -67,6 +67,9 @@ PALETA = {
     "muted": "#6B6878",
     "border": "#DED9F0",
     "trough": "#E7E2F7",
+    "ok": "#2E9E6B",
+    "error": "#D64550",
+    "warn": "#C7862B",
 }
 
 
@@ -171,6 +174,9 @@ class TranscriptorApp:
         self.ultima_salida = None
         self.cancelar = threading.Event()
         self.temp_dirs = []
+        self.estado_actual = "neutro"   # para que _finalizar() sepa que no pisar (ok/error/cancelado)
+        self.t_transcripcion_inicio = 0.0
+        self.dur_actual = 0.0
 
         # Estado de grabacion desde el microfono / entrada de audio.
         self.grabando = False
@@ -206,7 +212,7 @@ class TranscriptorApp:
 
         fr_ff = ttk.LabelFrame(cont, text="FFmpeg (opcional, solo mejora descargas de YouTube)", padding=8)
         fr_ff.pack(fill="x", **pad)
-        self.lbl_ff = ttk.Label(fr_ff, text="Detectando...", foreground="gray")
+        self.lbl_ff = ttk.Label(fr_ff, text="Detectando...", foreground=PALETA["muted"])
         self.lbl_ff.pack(side="left", fill="x", expand=True)
         ttk.Button(fr_ff, text="Seleccionar carpeta bin", command=self._elegir_ffmpeg).pack(side="right")
 
@@ -236,6 +242,9 @@ class TranscriptorApp:
         self.pb_nivel = ttk.Progressbar(fr_rec, orient="horizontal",
                                         mode="determinate", length=140, maximum=100)
         self.pb_nivel.pack(side="left", padx=(4, 0))
+        self.v_auto_transcribir = tk.BooleanVar(value=False)
+        ttk.Checkbutton(fr_rec, text="Transcribir automáticamente al detener",
+                        variable=self.v_auto_transcribir).pack(side="left", padx=(12, 0))
 
         fr_files = ttk.LabelFrame(cont, text="Archivos de audio / video", padding=8)
         fr_files.pack(fill="both", expand=True, **pad)
@@ -288,7 +297,7 @@ class TranscriptorApp:
         self.v_out = tk.StringVar(value="")
         ttk.Entry(fr_o, textvariable=self.v_out).grid(row=3, column=1, columnspan=2, sticky="we", padx=4, pady=4)
         ttk.Button(fr_o, text="Examinar", command=self._elegir_salida).grid(row=3, column=3, sticky="w", padx=4)
-        ttk.Label(fr_o, text="(vacio = junto a cada audio)", foreground="gray").grid(row=4, column=1, columnspan=2, sticky="w", padx=4)
+        ttk.Label(fr_o, text="(vacio = junto a cada audio)", foreground=PALETA["muted"]).grid(row=4, column=1, columnspan=2, sticky="w", padx=4)
         fr_o.columnconfigure(1, weight=1)
 
         fr_a = ttk.Frame(cont)
@@ -302,7 +311,7 @@ class TranscriptorApp:
         self.pb = ttk.Progressbar(fr_a, mode="determinate", maximum=100, length=200)
         self.pb.pack(side="right", fill="x", expand=True, padx=8)
 
-        self.lbl_st = ttk.Label(cont, text="Listo.", foreground="gray")
+        self.lbl_st = ttk.Label(cont, text="Listo.", foreground=PALETA["muted"])
         self.lbl_st.pack(fill="x", padx=8)
 
         fr_l = ttk.LabelFrame(cont, text="Registro", padding=8)
@@ -322,7 +331,8 @@ class TranscriptorApp:
         if c.get("salida"):
             self.v_out.set(c["salida"])
         for k, var in [("txt", self.v_txt), ("md", self.v_md), ("srt", self.v_srt),
-                       ("vtt", self.v_vtt), ("vad", self.v_vad), ("words", self.v_words)]:
+                       ("vtt", self.v_vtt), ("vad", self.v_vad), ("words", self.v_words),
+                       ("auto_transcribir", self.v_auto_transcribir)]:
             if k in c:
                 var.set(bool(c[k]))
 
@@ -334,15 +344,16 @@ class TranscriptorApp:
             "txt": self.v_txt.get(), "md": self.v_md.get(),
             "srt": self.v_srt.get(), "vtt": self.v_vtt.get(),
             "vad": self.v_vad.get(), "words": self.v_words.get(),
+            "auto_transcribir": self.v_auto_transcribir.get(),
         })
 
     def _init_ffmpeg(self):
         d = detectar_ffmpeg()
         if d:
             self.ffmpeg_dir = d
-            self.lbl_ff.config(text=f"Detectado: {d}", foreground="green")
+            self.lbl_ff.config(text=f"Detectado: {d}", foreground=PALETA["ok"])
         else:
-            self.lbl_ff.config(text="No detectado (la transcripcion no lo necesita).", foreground="gray")
+            self.lbl_ff.config(text="No detectado (la transcripcion no lo necesita).", foreground=PALETA["muted"])
 
     def _elegir_ffmpeg(self):
         d = filedialog.askdirectory(title="Carpeta que contiene ffmpeg")
@@ -350,7 +361,7 @@ class TranscriptorApp:
             return
         if (Path(d) / "ffmpeg.exe").exists() or (Path(d) / "ffmpeg").exists():
             self.ffmpeg_dir = d
-            self.lbl_ff.config(text=f"Detectado: {d}", foreground="green")
+            self.lbl_ff.config(text=f"Detectado: {d}", foreground=PALETA["ok"])
         else:
             messagebox.showerror("FFmpeg", "No se encontro ffmpeg en esa carpeta.")
 
@@ -533,7 +544,7 @@ class TranscriptorApp:
             return
 
         self.btn_grab.config(state="disabled")
-        self.lbl_st.config(text=f"Instalando '{nombre_visible}'…", foreground="gray")
+        self._set_estado(f"Instalando '{nombre_visible}'…", "neutro")
         self._escribe(f"Instalando '{nombre_visible}' (solo la primera vez)…")
 
         def trabajo():
@@ -560,7 +571,7 @@ class TranscriptorApp:
         try:
             mod = __import__(modulo)
             self._escribe("Componente de grabación instalado.")
-            self.lbl_st.config(text="Listo.", foreground="gray")
+            self._set_estado("Listo.", "ok")
             on_listo(mod)
         except OSError:
             messagebox.showerror(
@@ -608,9 +619,9 @@ class TranscriptorApp:
         self.t_grab_inicio = time.time()
         self.btn_grab.config(text="■  Detener")
         self._escribe(f"Grabando {descripcion} -> {Path(self.ruta_grab).name}")
-        self.lbl_st.config(
-            text="Grabando… observa el medidor de Nivel. Si no sube, elige otra Entrada.",
-            foreground="gray")
+        self._set_estado(
+            "Grabando… observa el medidor de Nivel. Si no sube, elige otra Entrada.",
+            "grabando")
         self._tick_grab()
 
     def _iniciar_grabacion(self):
@@ -773,7 +784,9 @@ class TranscriptorApp:
         if self.ruta_grab and os.path.exists(self.ruta_grab) and os.path.getsize(self.ruta_grab) > 44:
             self._insertar_archivo(self.ruta_grab)
             self._escribe(f"Grabación guardada y agregada: {Path(self.ruta_grab).name}")
-            self.lbl_st.config(text="Grabación lista. Ya puedes transcribirla.", foreground="gray")
+            self._set_estado("Grabación lista. Ya puedes transcribirla.", "ok")
+            if self.v_auto_transcribir.get() and not self.transcribiendo:
+                self._iniciar()
         else:
             self._escribe("Grabación vacía o no guardada.")
         self.ruta_grab = None
@@ -891,6 +904,8 @@ class TranscriptorApp:
                 segments, info = self.modelo.transcribe(
                     archivo, language=idioma, vad_filter=vad, word_timestamps=words)
                 dur = info.duration or 0
+                self.dur_actual = dur
+                self.t_transcripcion_inicio = t0
 
                 segs = []
                 partes = []
@@ -901,6 +916,7 @@ class TranscriptorApp:
                     partes.append(seg.text)
                     if dur:
                         self.cola.put(("progress", min(100.0, seg.end / dur * 100)))
+                    self.cola.put(("segmento", (seg.start, seg.end, seg.text)))
                 texto = "".join(partes).strip()
 
                 if salida:
@@ -987,7 +1003,7 @@ class TranscriptorApp:
     def _cancelar(self):
         if self.transcribiendo:
             self.cancelar.set()
-            self.lbl_st.config(text="Cancelando...", foreground="gray")
+            self._set_estado("Cancelando...", "neutro")
 
     def _procesar_cola(self):
         try:
@@ -996,17 +1012,21 @@ class TranscriptorApp:
                 if tipo == "log":
                     self._escribe(p[0])
                 elif tipo == "status":
-                    self.lbl_st.config(text=p[0], foreground="gray")
+                    self._set_estado(p[0], "neutro")
                     self._escribe(p[0])
                 elif tipo == "progress":
                     self.pb["value"] = p[0]
+                elif tipo == "segmento":
+                    inicio, fin, texto = p[0]
+                    self._escribe(f"  [{ts_simple(inicio)} -> {ts_simple(fin)}] {texto.strip()}")
+                    self._actualizar_eta(fin)
                 elif tipo == "error":
                     self._escribe("ERROR:\n" + p[0])
-                    self.lbl_st.config(text="Error. Revisa el registro.", foreground="red")
+                    self._set_estado("Error. Revisa el registro.", "error")
                     messagebox.showerror("Error", p[0].strip().splitlines()[-1])
                 elif tipo == "cancelado":
                     self._escribe("=== Cancelado por el usuario ===")
-                    self.lbl_st.config(text="Cancelado.", foreground="gray")
+                    self._set_estado("Cancelado.", "cancelado")
                 elif tipo == "done":
                     self._finalizar()
                 elif tipo == "dep_instalada":
@@ -1033,14 +1053,45 @@ class TranscriptorApp:
         self.btn_cancel.config(state="disabled")
         if self.ultima_salida:
             self.btn_open.config(state="normal")
-        if self.lbl_st.cget("foreground") != "red" and "ancelad" not in self.lbl_st.cget("text"):
-            self.lbl_st.config(text="Listo.", foreground="gray")
+        if self.estado_actual not in ("error", "cancelado"):
+            self._set_estado("Listo.", "ok")
 
     def _escribe(self, msg):
         self.log.config(state="normal")
         self.log.insert("end", msg + "\n")
         self.log.see("end")
         self.log.config(state="disabled")
+
+    def _actualizar_eta(self, fin_transcrito):
+        """Calcula un ETA aproximado a partir de lo transcurrido y lo ya
+        transcrito, y lo muestra en el estado (llamado en cada segmento)."""
+        dur = self.dur_actual
+        if not dur:
+            return
+        transcurrido = time.time() - self.t_transcripcion_inicio
+        avance = min(1.0, fin_transcrito / dur)
+        if avance <= 0 or transcurrido <= 0:
+            return
+        restante = max(0.0, transcurrido / avance - transcurrido)
+        self._set_estado(
+            f"Transcribiendo… {avance * 100:.0f}% · tiempo restante ~{ts_simple(restante)}",
+            "grabando")
+
+    def _set_estado(self, texto, tipo="neutro"):
+        """Actualiza la etiqueta de estado con un color del sistema de diseño
+        (PALETA), en vez de colores crudos sueltos por el codigo. `tipo` en
+        {"neutro","ok","error","cancelado","grabando"}; se recuerda en
+        self.estado_actual para que _finalizar() no pise un error o una
+        cancelacion con un "Listo." generico."""
+        color = {
+            "neutro": PALETA["muted"],
+            "ok": PALETA["ok"],
+            "error": PALETA["error"],
+            "cancelado": PALETA["muted"],
+            "grabando": PALETA["primary"],
+        }.get(tipo, PALETA["muted"])
+        self.lbl_st.config(text=texto, foreground=color)
+        self.estado_actual = tipo
 
     def _cerrar(self):
         if self.grabando:

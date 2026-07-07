@@ -47,6 +47,8 @@ en tu equipo. A partir de ahí funciona **sin conexión**.
 - Idiomas: español, inglés, portugués, francés o detección automática.
 - Exporta a `.txt`, `.md` (Obsidian), `.srt` y `.vtt`. El `.txt` viene **ajustado a
   ~100 caracteres por línea**, para leerlo sin desplazarte hacia el lado.
+- Mientras transcribe, el **Registro** muestra cada segmento a medida que sale y el
+  estado indica un **tiempo restante estimado**.
 - No necesita FFmpeg para transcribir (lo decodifica internamente). FFmpeg solo
   mejora, opcionalmente, las descargas de YouTube.
 
@@ -68,6 +70,9 @@ La lista **Entrada** muestra dos tipos de fuentes:
 
 > Graba a la frecuencia nativa del dispositivo (o 48 kHz para audio de sistema) y mezcla
 > a mono internamente; Whisper remuestrea solo.
+
+Marca **"Transcribir automáticamente al detener"** para que, al pulsar ■ Detener, la
+transcripción arranque sola con la configuración actual (modelo, idioma, formatos).
 
 ### Captura de audio del sistema por plataforma
 
