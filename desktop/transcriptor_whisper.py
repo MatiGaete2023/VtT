@@ -70,6 +70,28 @@ PALETA = {
     "ok": "#2E9E6B",
     "error": "#D64550",
     "warn": "#C7862B",
+    "disabled_btn": "#EFEDF6",
+    "disabled_accent": "#C5BEEC",
+    "disabled_accent_fg": "#F2F0FB",
+}
+
+# Paleta oscura equivalente (mismo violeta de marca, superficies oscuras).
+PALETA_OSCURA = {
+    "bg": "#17151F",
+    "surface": "#211D2E",
+    "primary": "#8670F5",
+    "primary_dark": "#6C4DF2",
+    "primary_soft": "#2C2640",
+    "text": "#F1EFFA",
+    "muted": "#A39FB5",
+    "border": "#372F49",
+    "trough": "#2A2438",
+    "ok": "#4CC38A",
+    "error": "#F0677A",
+    "warn": "#E0A756",
+    "disabled_btn": "#241F33",
+    "disabled_accent": "#443A63",
+    "disabled_accent_fg": "#8A82A8",
 }
 
 
@@ -193,6 +215,9 @@ class TranscriptorApp:
         self.grab_descarta = 0       # bloques a descartar al inicio (transitorio)
 
         self.cfg = cargar_config()
+        self.tema_oscuro = self.cfg.get("tema") == "oscuro"
+        self.paleta = PALETA_OSCURA if self.tema_oscuro else PALETA
+        _aplicar_estilo(self.root, self.paleta)
         self._ui()
         self._init_ffmpeg()
         self._aplicar_config()
@@ -206,13 +231,18 @@ class TranscriptorApp:
 
         header = ttk.Frame(cont)
         header.pack(fill="x", padx=4, pady=(0, 10))
-        ttk.Label(header, text="🎙  Transcriptor Whisper", style="Title.TLabel").pack(anchor="w")
-        ttk.Label(header, text="Voz a texto en tu equipo · privado y sin conexión",
+        header_txt = ttk.Frame(header)
+        header_txt.pack(side="left", fill="x", expand=True)
+        ttk.Label(header_txt, text="🎙  Transcriptor Whisper", style="Title.TLabel").pack(anchor="w")
+        ttk.Label(header_txt, text="Voz a texto en tu equipo · privado y sin conexión",
                   style="Subtitle.TLabel").pack(anchor="w")
+        self.btn_tema = ttk.Button(header, text="☀️" if self.tema_oscuro else "🌙",
+                                   width=3, command=self._alternar_tema)
+        self.btn_tema.pack(side="right", anchor="n")
 
         fr_ff = ttk.LabelFrame(cont, text="FFmpeg (opcional, solo mejora descargas de YouTube)", padding=8)
         fr_ff.pack(fill="x", **pad)
-        self.lbl_ff = ttk.Label(fr_ff, text="Detectando...", foreground=PALETA["muted"])
+        self.lbl_ff = ttk.Label(fr_ff, text="Detectando...", foreground=self.paleta["muted"])
         self.lbl_ff.pack(side="left", fill="x", expand=True)
         ttk.Button(fr_ff, text="Seleccionar carpeta bin", command=self._elegir_ffmpeg).pack(side="right")
 
@@ -220,8 +250,12 @@ class TranscriptorApp:
         fr_yt.pack(fill="x", **pad)
         self.var_url = tk.StringVar(value="")
         ttk.Entry(fr_yt, textvariable=self.var_url).pack(side="left", fill="x", expand=True, padx=(0, 8))
+        self.pb_yt = ttk.Progressbar(fr_yt, orient="horizontal", mode="determinate",
+                                     length=90, maximum=100)
         self.btn_yt = ttk.Button(fr_yt, text="Descargar audio y agregar", command=self._descargar_yt)
         self.btn_yt.pack(side="right")
+        self.pb_yt.pack(side="right", padx=(0, 8))
+        self.pb_yt.pack_forget()  # solo visible mientras descarga
 
         fr_rec = ttk.LabelFrame(cont, text="Grabar desde micrófono / entrada de audio", padding=8)
         fr_rec.pack(fill="x", **pad)
@@ -249,9 +283,9 @@ class TranscriptorApp:
         fr_files = ttk.LabelFrame(cont, text="Archivos de audio / video", padding=8)
         fr_files.pack(fill="both", expand=True, **pad)
         self.lst = tk.Listbox(fr_files, height=6, selectmode="extended",
-                              bg=PALETA["surface"], fg=PALETA["text"], borderwidth=0,
-                              highlightthickness=1, highlightbackground=PALETA["border"],
-                              selectbackground=PALETA["primary"], selectforeground="#FFFFFF",
+                              bg=self.paleta["surface"], fg=self.paleta["text"], borderwidth=0,
+                              highlightthickness=1, highlightbackground=self.paleta["border"],
+                              selectbackground=self.paleta["primary"], selectforeground="#FFFFFF",
                               activestyle="none")
         self.lst.pack(side="left", fill="both", expand=True)
         sb = ttk.Scrollbar(fr_files, orient="vertical", command=self.lst.yview)
@@ -297,7 +331,7 @@ class TranscriptorApp:
         self.v_out = tk.StringVar(value="")
         ttk.Entry(fr_o, textvariable=self.v_out).grid(row=3, column=1, columnspan=2, sticky="we", padx=4, pady=4)
         ttk.Button(fr_o, text="Examinar", command=self._elegir_salida).grid(row=3, column=3, sticky="w", padx=4)
-        ttk.Label(fr_o, text="(vacio = junto a cada audio)", foreground=PALETA["muted"]).grid(row=4, column=1, columnspan=2, sticky="w", padx=4)
+        ttk.Label(fr_o, text="(vacio = junto a cada audio)", foreground=self.paleta["muted"]).grid(row=4, column=1, columnspan=2, sticky="w", padx=4)
         fr_o.columnconfigure(1, weight=1)
 
         fr_a = ttk.Frame(cont)
@@ -311,15 +345,15 @@ class TranscriptorApp:
         self.pb = ttk.Progressbar(fr_a, mode="determinate", maximum=100, length=200)
         self.pb.pack(side="right", fill="x", expand=True, padx=8)
 
-        self.lbl_st = ttk.Label(cont, text="Listo.", foreground=PALETA["muted"])
+        self.lbl_st = ttk.Label(cont, text="Listo.", foreground=self.paleta["muted"])
         self.lbl_st.pack(fill="x", padx=8)
 
         fr_l = ttk.LabelFrame(cont, text="Registro", padding=8)
         fr_l.pack(fill="both", expand=True, **pad)
         self.log = scrolledtext.ScrolledText(fr_l, height=8, state="disabled", wrap="word",
-                                             bg=PALETA["surface"], fg=PALETA["text"], borderwidth=0,
-                                             highlightthickness=1, highlightbackground=PALETA["border"],
-                                             insertbackground=PALETA["text"])
+                                             bg=self.paleta["surface"], fg=self.paleta["text"], borderwidth=0,
+                                             highlightthickness=1, highlightbackground=self.paleta["border"],
+                                             insertbackground=self.paleta["text"])
         self.log.pack(fill="both", expand=True)
 
     def _aplicar_config(self):
@@ -345,15 +379,16 @@ class TranscriptorApp:
             "srt": self.v_srt.get(), "vtt": self.v_vtt.get(),
             "vad": self.v_vad.get(), "words": self.v_words.get(),
             "auto_transcribir": self.v_auto_transcribir.get(),
+            "tema": "oscuro" if self.tema_oscuro else "claro",
         })
 
     def _init_ffmpeg(self):
         d = detectar_ffmpeg()
         if d:
             self.ffmpeg_dir = d
-            self.lbl_ff.config(text=f"Detectado: {d}", foreground=PALETA["ok"])
+            self.lbl_ff.config(text=f"Detectado: {d}", foreground=self.paleta["ok"])
         else:
-            self.lbl_ff.config(text="No detectado (la transcripcion no lo necesita).", foreground=PALETA["muted"])
+            self.lbl_ff.config(text="No detectado (la transcripcion no lo necesita).", foreground=self.paleta["muted"])
 
     def _elegir_ffmpeg(self):
         d = filedialog.askdirectory(title="Carpeta que contiene ffmpeg")
@@ -361,7 +396,7 @@ class TranscriptorApp:
             return
         if (Path(d) / "ffmpeg.exe").exists() or (Path(d) / "ffmpeg").exists():
             self.ffmpeg_dir = d
-            self.lbl_ff.config(text=f"Detectado: {d}", foreground=PALETA["ok"])
+            self.lbl_ff.config(text=f"Detectado: {d}", foreground=self.paleta["ok"])
         else:
             messagebox.showerror("FFmpeg", "No se encontro ffmpeg en esa carpeta.")
 
@@ -405,12 +440,24 @@ class TranscriptorApp:
             return
         self.bajando_yt = True
         self.btn_yt.config(state="disabled")
+        self.pb_yt["value"] = 0
+        self.pb_yt.pack(side="right", padx=(0, 8))
         self._escribe(f"Descargando audio de: {url}")
         threading.Thread(target=self._worker_yt, args=(url,), daemon=True).start()
 
     def _worker_yt(self, url):
         try:
             import yt_dlp
+
+            def avance(d):
+                if d.get("status") == "downloading":
+                    total = d.get("total_bytes") or d.get("total_bytes_estimate")
+                    bajado = d.get("downloaded_bytes") or 0
+                    if total:
+                        self.cola.put(("yt_progress", min(100.0, bajado / total * 100)))
+                elif d.get("status") == "finished":
+                    self.cola.put(("yt_progress", 100.0))
+
             tmp = tempfile.mkdtemp(prefix="ytw_")
             self.temp_dirs.append(tmp)
             opts = {
@@ -419,6 +466,7 @@ class TranscriptorApp:
                 "noplaylist": True,
                 "quiet": True,
                 "no_warnings": True,
+                "progress_hooks": [avance],
             }
             if self.ffmpeg_dir:
                 opts["ffmpeg_location"] = self.ffmpeg_dir
@@ -1032,15 +1080,19 @@ class TranscriptorApp:
                 elif tipo == "dep_instalada":
                     modulo, nombre_visible, ok, on_listo = p[0]
                     self._dep_instalada(modulo, nombre_visible, ok, on_listo)
+                elif tipo == "yt_progress":
+                    self.pb_yt["value"] = p[0]
                 elif tipo == "yt_ok":
                     self.bajando_yt = False
                     self.btn_yt.config(state="normal")
+                    self.pb_yt.pack_forget()
                     self._insertar_archivo(p[0])
                     self.var_url.set("")
                     self._escribe(f"Audio agregado: {Path(p[0]).name}")
                 elif tipo == "yt_err":
                     self.bajando_yt = False
                     self.btn_yt.config(state="normal")
+                    self.pb_yt.pack_forget()
                     self._escribe("ERROR YouTube:\n" + p[0])
                     messagebox.showerror("YouTube", p[0].strip().splitlines()[-1])
         except queue.Empty:
@@ -1084,14 +1136,38 @@ class TranscriptorApp:
         self.estado_actual para que _finalizar() no pise un error o una
         cancelacion con un "Listo." generico."""
         color = {
-            "neutro": PALETA["muted"],
-            "ok": PALETA["ok"],
-            "error": PALETA["error"],
-            "cancelado": PALETA["muted"],
-            "grabando": PALETA["primary"],
-        }.get(tipo, PALETA["muted"])
+            "neutro": self.paleta["muted"],
+            "ok": self.paleta["ok"],
+            "error": self.paleta["error"],
+            "cancelado": self.paleta["muted"],
+            "grabando": self.paleta["primary"],
+        }.get(tipo, self.paleta["muted"])
         self.lbl_st.config(text=texto, foreground=color)
         self.estado_actual = tipo
+
+    def _alternar_tema(self):
+        """Alterna claro/oscuro: repinta los estilos ttk y los widgets crudos
+        de Tk (Listbox y ScrolledText no son ttk, no se actualizan solos)."""
+        self.tema_oscuro = not self.tema_oscuro
+        self.paleta = PALETA_OSCURA if self.tema_oscuro else PALETA
+        _aplicar_estilo(self.root, self.paleta)
+
+        self.lst.configure(bg=self.paleta["surface"], fg=self.paleta["text"],
+                           highlightbackground=self.paleta["border"],
+                           selectbackground=self.paleta["primary"])
+        self.log.configure(bg=self.paleta["surface"], fg=self.paleta["text"],
+                           highlightbackground=self.paleta["border"],
+                           insertbackground=self.paleta["text"])
+        self.btn_tema.config(text="☀️" if self.tema_oscuro else "🌙")
+
+        # Repinta las etiquetas cuyo color no depende de un ttk.Style.
+        self._set_estado(self.lbl_st.cget("text"), self.estado_actual)
+        if self.ffmpeg_dir:
+            self.lbl_ff.config(foreground=self.paleta["ok"])
+        else:
+            self.lbl_ff.config(foreground=self.paleta["muted"])
+
+        self._snapshot_config()
 
     def _cerrar(self):
         if self.grabando:
@@ -1112,15 +1188,18 @@ def _fuente_ui():
     return "DejaVu Sans"
 
 
-def _aplicar_estilo(root):
-    """Aplica un estilo plano, moderno y con color (minimalista) a la interfaz."""
+def _aplicar_estilo(root, paleta):
+    """Aplica un estilo plano, moderno y con color (minimalista) a la interfaz.
+
+    Se puede llamar mas de una vez (p.ej. al alternar claro/oscuro): vuelve a
+    configurar los mismos estilos con la paleta nueva."""
     style = ttk.Style()
     try:
         style.theme_use("clam")  # base themeable y consistente entre sistemas
     except Exception:
         pass
 
-    p = PALETA
+    p = paleta
     fam = _fuente_ui()
     root.configure(bg=p["bg"])
 
@@ -1136,14 +1215,14 @@ def _aplicar_estilo(root):
     style.configure("TButton", background=p["surface"], foreground=p["text"],
                     borderwidth=1, focusthickness=0, padding=(10, 6), relief="flat")
     style.map("TButton",
-              background=[("active", p["primary_soft"]), ("disabled", "#EFEDF6")],
+              background=[("active", p["primary_soft"]), ("disabled", p["disabled_btn"])],
               bordercolor=[("active", p["primary"])])
 
     style.configure("Accent.TButton", background=p["primary"], foreground="#FFFFFF",
                     borderwidth=0, padding=(14, 9), font=(fam, 10, "bold"), relief="flat")
     style.map("Accent.TButton",
-              background=[("active", p["primary_dark"]), ("disabled", "#C5BEEC")],
-              foreground=[("disabled", "#F2F0FB")])
+              background=[("active", p["primary_dark"]), ("disabled", p["disabled_accent"])],
+              foreground=[("disabled", p["disabled_accent_fg"])])
 
     style.configure("TCheckbutton", background=p["bg"], foreground=p["text"])
     style.map("TCheckbutton", background=[("active", p["bg"])])
@@ -1157,7 +1236,6 @@ def _aplicar_estilo(root):
 
 def main():
     root = tk.Tk()
-    _aplicar_estilo(root)
     TranscriptorApp(root)
     root.mainloop()
 

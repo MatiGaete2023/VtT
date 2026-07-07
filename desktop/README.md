@@ -42,7 +42,9 @@ en tu equipo. A partir de ahí funciona **sin conexión**.
 
 - Transcribe `.mp3 .wav .m4a .ogg .flac .mp4 .aac .wma .opus .webm .mkv .avi`.
 - **Graba desde el micrófono / entrada de audio** y agrega la grabación para transcribir.
-- Descarga audio de YouTube (pega la URL) para transcribirlo.
+- Descarga audio de YouTube (pega la URL) para transcribirlo, con **barra de progreso**
+  de la descarga.
+- **Modo claro / oscuro**: botón 🌙/☀️ arriba a la derecha; se recuerda entre sesiones.
 - Modelos: `tiny`, `base`, `small`, `medium`, `large-v3` (más grande = más preciso y más lento).
 - Idiomas: español, inglés, portugués, francés o detección automática.
 - Exporta a `.txt`, `.md` (Obsidian), `.srt` y `.vtt`. El `.txt` viene **ajustado a
