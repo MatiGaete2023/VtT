@@ -6,15 +6,24 @@ package cl.vtt.transcriptor
  */
 class WhisperBridge {
 
+    /** Llamado desde el hilo nativo mientras transcribe, con el avance 0..100. */
+    fun interface ProgressListener {
+        fun onProgress(pct: Int)
+    }
+
     external fun nativeInit(modelPath: String): Long
 
-    external fun nativeFree(ptr: Long)
+    external fun nativeFree(handle: Long)
+
+    /** Pide cancelar una transcripcion en curso con este handle (cualquier hilo). */
+    external fun nativeRequestAbort(handle: Long)
 
     external fun nativeTranscribe(
-        ptr: Long,
+        handle: Long,
         audio: FloatArray,
         lang: String?,
-        nThreads: Int
+        nThreads: Int,
+        listener: ProgressListener?
     ): String
 
     companion object {

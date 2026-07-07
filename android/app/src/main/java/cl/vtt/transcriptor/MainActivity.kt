@@ -19,7 +19,10 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import cl.vtt.transcriptor.databinding.ActivityMainBinding
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.OutputStreamWriter
 
 class MainActivity : AppCompatActivity() {
 
@@ -35,6 +38,11 @@ class MainActivity : AppCompatActivity() {
     private val pickAudio =
         registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
             if (uri != null) tomarUri(uri)
+        }
+
+    private val guardarTxt =
+        registerForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
+            if (uri != null) guardarResultadoEn(uri)
         }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -74,10 +82,19 @@ class MainActivity : AppCompatActivity() {
             viewModel.transcribe(applicationContext, uri, model, langCodes[langPos])
         }
 
+        b.btnCancel.setOnClickListener {
+            viewModel.cancelar()
+        }
+
         b.btnCopy.setOnClickListener {
             val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
             cm.setPrimaryClip(ClipData.newPlainText("transcripcion", b.txtResult.text.toString()))
             Toast.makeText(this, "Texto copiado", Toast.LENGTH_SHORT).show()
+        }
+
+        b.btnSave.setOnClickListener {
+            val base = selectedUri?.let { displayName(it).substringBeforeLast('.') } ?: "transcripcion"
+            guardarTxt.launch("$base.txt")
         }
 
         b.btnShare.setOnClickListener {
@@ -129,16 +146,61 @@ class MainActivity : AppCompatActivity() {
         b.btnTranscribe.isEnabled = !viewModel.isWorking
     }
 
+    private fun guardarResultadoEn(uri: Uri) {
+        val texto = envolverTexto(b.txtResult.text.toString())
+        lifecycleScope.launch {
+            val ok = withContext(Dispatchers.IO) {
+                try {
+                    contentResolver.openOutputStream(uri)?.use { out ->
+                        OutputStreamWriter(out, Charsets.UTF_8).use { it.write(texto) }
+                    }
+                    true
+                } catch (_: Exception) {
+                    false
+                }
+            }
+            Toast.makeText(
+                this@MainActivity,
+                if (ok) "Transcripción guardada" else "No se pudo guardar el archivo",
+                Toast.LENGTH_SHORT
+            ).show()
+        }
+    }
+
+    /** Ajusta el texto a ~100 columnas, igual que la version de escritorio,
+     * para que se pueda leer sin desplazarse hacia el lado. */
+    private fun envolverTexto(texto: String, ancho: Int = 100): String {
+        return texto.split("\n").joinToString("\n") { parrafo ->
+            if (parrafo.isBlank()) return@joinToString parrafo
+            val palabras = parrafo.split(" ")
+            val lineas = mutableListOf<StringBuilder>(StringBuilder())
+            for (palabra in palabras) {
+                val actual = lineas.last()
+                val nuevoLargo = (if (actual.isEmpty()) 0 else actual.length + 1) + palabra.length
+                if (nuevoLargo > ancho && actual.isNotEmpty()) {
+                    lineas.add(StringBuilder(palabra))
+                } else {
+                    if (actual.isNotEmpty()) actual.append(' ')
+                    actual.append(palabra)
+                }
+            }
+            lineas.joinToString("\n")
+        }
+    }
+
     private fun render(estado: TranscribeUiState) {
         when (estado) {
             is TranscribeUiState.Idle -> {
+                // No toca txtStatus: si Idle llega tras descartarEstadoFinal()
+                // (después de un error o cancelación), el mensaje debe quedar
+                // visible hasta la próxima acción, no taparse con "Listo.".
                 setBusy(false)
-                b.txtStatus.text = getString(R.string.ready)
             }
             is TranscribeUiState.Working -> {
                 setBusy(true)
                 b.txtStatus.text = estado.message
                 b.btnCopy.isEnabled = false
+                b.btnSave.isEnabled = false
                 b.btnShare.isEnabled = false
                 if (estado.progressPct != null) {
                     b.progress.isIndeterminate = false
@@ -151,20 +213,28 @@ class MainActivity : AppCompatActivity() {
                 setBusy(false)
                 b.txtResult.setText(estado.text)
                 b.btnCopy.isEnabled = estado.text.isNotEmpty()
+                b.btnSave.isEnabled = estado.text.isNotEmpty()
                 b.btnShare.isEnabled = estado.text.isNotEmpty()
                 b.txtStatus.text = if (estado.text.isEmpty()) "No se detectó voz." else "Listo."
+            }
+            is TranscribeUiState.Cancelled -> {
+                setBusy(false)
+                b.txtStatus.text = getString(R.string.cancelled)
+                viewModel.descartarEstadoFinal()
             }
             is TranscribeUiState.Error -> {
                 setBusy(false)
                 b.txtStatus.text = "Error: ${estado.message}"
                 Toast.makeText(this, estado.message, Toast.LENGTH_LONG).show()
-                viewModel.descartarError()
+                viewModel.descartarEstadoFinal()
             }
         }
     }
 
     private fun setBusy(busy: Boolean) {
         b.progress.visibility = if (busy) View.VISIBLE else View.GONE
+        b.btnCancel.visibility = if (busy) View.VISIBLE else View.GONE
+        b.btnCancel.isEnabled = busy
         b.btnTranscribe.isEnabled = !busy && selectedUri != null
         b.btnSelect.isEnabled = !busy
         b.tilModel.isEnabled = !busy

@@ -1,6 +1,8 @@
 // Puente JNI entre la app Android (Kotlin) y whisper.cpp.
-// Expone: inicializar el modelo, transcribir un buffer de audio PCM y liberar.
+// Expone: inicializar el modelo, transcribir un buffer de audio PCM (con
+// progreso y cancelacion), y liberar.
 #include <jni.h>
+#include <atomic>
 #include <string>
 #include <vector>
 #include <android/log.h>
@@ -11,10 +13,44 @@
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
+namespace {
+
+// El "handle" que se entrega a Kotlin envuelve el contexto de whisper.cpp
+// junto con una bandera de cancelacion. whisper_full() sondea esta bandera
+// via abort_callback (tipo ggml_abort_callback: bool(*)(void*)) durante el
+// computo, asi que puede cancelarse en cualquier momento desde otro hilo
+// simplemente escribiendo en el atomic (sin volver a llamar a la JVM).
+struct Handle {
+    struct whisper_context *ctx;
+    std::atomic<bool> abort{false};
+};
+
+bool abort_trampoline(void *data) {
+    return reinterpret_cast<std::atomic<bool> *>(data)->load();
+}
+
+// Contexto para reenviar el progreso a un listener de Kotlin durante la
+// misma llamada (mismo hilo, mismo JNIEnv que entro a nativeTranscribe).
+struct ProgressCtx {
+    JNIEnv *env;
+    jobject listener;   // instancia de WhisperBridge.ProgressListener
+    jmethodID method;   // onProgress(I)V
+};
+
+void progress_trampoline(struct whisper_context * /*ctx*/, struct whisper_state * /*state*/,
+                          int progress, void *userData) {
+    auto *pc = reinterpret_cast<ProgressCtx *>(userData);
+    if (pc != nullptr && pc->listener != nullptr) {
+        pc->env->CallVoidMethod(pc->listener, pc->method, static_cast<jint>(progress));
+    }
+}
+
+} // namespace
+
 extern "C" {
 
 // Inicializa el contexto de whisper a partir de un archivo de modelo .bin (ggml).
-// Devuelve un puntero (como long) o 0 si falla.
+// Devuelve un handle (como long) o 0 si falla.
 JNIEXPORT jlong JNICALL
 Java_cl_vtt_transcriptor_WhisperBridge_nativeInit(
         JNIEnv *env, jobject /* this */, jstring jModelPath) {
@@ -33,30 +69,55 @@ Java_cl_vtt_transcriptor_WhisperBridge_nativeInit(
         LOGE("No se pudo cargar el modelo");
         return 0;
     }
-    return reinterpret_cast<jlong>(ctx);
+    auto *handle = new Handle{ctx};
+    return reinterpret_cast<jlong>(handle);
 }
 
-// Libera el contexto de whisper.
+// Libera el contexto de whisper (pesado: cientos de MB del modelo).
+//
+// A proposito NO se hace `delete handle`: nativeRequestAbort() puede recibir
+// este mismo puntero desde otro hilo sin sincronizarse con esta llamada (ver
+// comentario en Transcriber.kt), justo cuando se libera. Mantener el Handle
+// (unos pocos bytes) vivo para siempre evita un use-after-free a cambio de
+// una fuga minima y acotada: ocurre como mucho una vez por ciclo de vida del
+// ViewModel, no por cada transcripcion.
 JNIEXPORT void JNICALL
 Java_cl_vtt_transcriptor_WhisperBridge_nativeFree(
-        JNIEnv * /* env */, jobject /* this */, jlong ptr) {
-    if (ptr != 0) {
-        whisper_free(reinterpret_cast<struct whisper_context *>(ptr));
+        JNIEnv * /* env */, jobject /* this */, jlong handlePtr) {
+    if (handlePtr != 0) {
+        auto *handle = reinterpret_cast<Handle *>(handlePtr);
+        whisper_free(handle->ctx);
+        handle->ctx = nullptr;
+    }
+}
+
+// Pide que una transcripcion en curso (con este handle) se detenga lo antes
+// posible. Seguro de llamar desde cualquier hilo (bandera atomica).
+JNIEXPORT void JNICALL
+Java_cl_vtt_transcriptor_WhisperBridge_nativeRequestAbort(
+        JNIEnv * /* env */, jobject /* this */, jlong handlePtr) {
+    if (handlePtr != 0) {
+        reinterpret_cast<Handle *>(handlePtr)->abort.store(true);
     }
 }
 
 // Transcribe audio mono a 16 kHz (float [-1,1]).
 // lang: codigo ISO ("es", "en", ...) o cadena vacia/null para deteccion automatica.
-// Devuelve el texto transcrito (segmentos separados por salto de linea).
+// listener: objeto con metodo onProgress(int), o null si no interesa el progreso.
+// Devuelve el texto transcrito, o cadena vacia si fallo o se cancelo.
 JNIEXPORT jstring JNICALL
 Java_cl_vtt_transcriptor_WhisperBridge_nativeTranscribe(
-        JNIEnv *env, jobject /* this */, jlong ptr,
-        jfloatArray jAudio, jstring jLang, jint nThreads) {
+        JNIEnv *env, jobject /* this */, jlong handlePtr,
+        jfloatArray jAudio, jstring jLang, jint nThreads, jobject jListener) {
 
-    auto *ctx = reinterpret_cast<struct whisper_context *>(ptr);
-    if (ctx == nullptr) {
+    if (handlePtr == 0) {
         return env->NewStringUTF("");
     }
+    auto *handle = reinterpret_cast<Handle *>(handlePtr);
+    if (handle->ctx == nullptr) {
+        return env->NewStringUTF("");
+    }
+    handle->abort.store(false);  // por si se reutiliza el mismo handle
 
     const jsize n = env->GetArrayLength(jAudio);
     std::vector<float> audio(static_cast<size_t>(n));
@@ -84,18 +145,37 @@ Java_cl_vtt_transcriptor_WhisperBridge_nativeTranscribe(
         wparams.language = nullptr;     // deteccion automatica
     }
 
+    wparams.abort_callback = abort_trampoline;
+    wparams.abort_callback_user_data = &handle->abort;
+
+    ProgressCtx progressCtx{env, nullptr, nullptr};
+    if (jListener != nullptr) {
+        jclass listenerClass = env->GetObjectClass(jListener);
+        jmethodID mid = env->GetMethodID(listenerClass, "onProgress", "(I)V");
+        if (mid != nullptr) {
+            progressCtx.listener = jListener;
+            progressCtx.method = mid;
+            wparams.progress_callback = progress_trampoline;
+            wparams.progress_callback_user_data = &progressCtx;
+        } else {
+            env->ExceptionClear();  // GetMethodID deja una excepcion pendiente si no encontro el metodo
+        }
+    }
+
     std::string result;
-    const int rc = whisper_full(ctx, wparams, audio.data(), static_cast<int>(audio.size()));
-    if (rc == 0) {
-        const int nSeg = whisper_full_n_segments(ctx);
+    const int rc = whisper_full(handle->ctx, wparams, audio.data(), static_cast<int>(audio.size()));
+    if (rc == 0 && !handle->abort.load()) {
+        const int nSeg = whisper_full_n_segments(handle->ctx);
         for (int i = 0; i < nSeg; ++i) {
-            const char *segText = whisper_full_get_segment_text(ctx, i);
+            const char *segText = whisper_full_get_segment_text(handle->ctx, i);
             if (segText != nullptr) {
                 result += segText;
             }
         }
-    } else {
+    } else if (rc != 0) {
         LOGE("whisper_full fallo con codigo %d", rc);
+    } else {
+        LOGI("Transcripcion cancelada por el usuario");
     }
 
     if (lang != nullptr) {

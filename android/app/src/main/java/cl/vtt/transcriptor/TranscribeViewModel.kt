@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -18,6 +19,7 @@ sealed interface TranscribeUiState {
     data class Working(val message: String, val progressPct: Int?) : TranscribeUiState
     data class Done(val text: String) : TranscribeUiState
     data class Error(val message: String) : TranscribeUiState
+    data object Cancelled : TranscribeUiState
 }
 
 /**
@@ -37,12 +39,14 @@ class TranscribeViewModel : ViewModel() {
     val uiState: StateFlow<TranscribeUiState> = _uiState.asStateFlow()
 
     private var job: Job? = null
+    @Volatile private var cancelSolicitado = false
 
     val isWorking: Boolean
         get() = job?.isActive == true
 
     fun transcribe(appContext: Context, uri: Uri, model: String, lang: String) {
         if (isWorking) return
+        cancelSolicitado = false
         job = viewModelScope.launch {
             try {
                 if (!ModelManager.isDownloaded(appContext, model)) {
@@ -66,21 +70,44 @@ class TranscribeViewModel : ViewModel() {
                     throw IllegalStateException("No se pudo leer audio del archivo")
                 }
 
-                _uiState.value = TranscribeUiState.Working("Transcribiendo en el dispositivo…", null)
+                _uiState.value = TranscribeUiState.Working("Transcribiendo en el dispositivo…", 0)
                 val text = withContext(Dispatchers.Default) {
                     transcriber.loadModel(modelFile.absolutePath, model)
-                    transcriber.transcribe(audio, lang.ifEmpty { null })
+                    transcriber.transcribe(audio, lang.ifEmpty { null }) { pct ->
+                        _uiState.value = TranscribeUiState.Working(
+                            "Transcribiendo en el dispositivo…", pct)
+                    }
                 }
 
-                _uiState.value = TranscribeUiState.Done(text)
+                _uiState.value = if (cancelSolicitado) {
+                    TranscribeUiState.Cancelled
+                } else {
+                    TranscribeUiState.Done(text)
+                }
+            } catch (e: CancellationException) {
+                throw e  // no interferir con la cancelacion estructurada de corutinas
             } catch (e: Exception) {
-                _uiState.value = TranscribeUiState.Error(e.message ?: "Error desconocido")
+                _uiState.value = if (cancelSolicitado) {
+                    TranscribeUiState.Cancelled
+                } else {
+                    TranscribeUiState.Error(e.message ?: "Error desconocido")
+                }
             }
         }
     }
 
-    fun descartarError() {
-        if (_uiState.value is TranscribeUiState.Error) {
+    /** Pide cancelar la transcripcion en curso. whisper.cpp sondea la bandera
+     * de cancelacion durante el computo, asi que se detiene en poco tiempo
+     * (no instantaneo). */
+    fun cancelar() {
+        if (!isWorking) return
+        cancelSolicitado = true
+        transcriber.requestAbort()
+        _uiState.value = TranscribeUiState.Working("Cancelando…", null)
+    }
+
+    fun descartarEstadoFinal() {
+        if (_uiState.value is TranscribeUiState.Error || _uiState.value is TranscribeUiState.Cancelled) {
             _uiState.value = TranscribeUiState.Idle
         }
     }
@@ -91,6 +118,7 @@ class TranscribeViewModel : ViewModel() {
         // curso, espera a que termine antes de liberar el contexto nativo.
         // Se hace en un hilo aparte para que onCleared() (hilo principal)
         // nunca se bloquee esperando.
+        transcriber.requestAbort()
         Thread { transcriber.free() }.start()
     }
 }

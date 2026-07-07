@@ -5,11 +5,14 @@
     <string name="select_audio">Seleccionar audio</string>
     <string name="transcribe">Transcribir</string>
     <string name="copy">Copiar</string>
+    <string name="save">Guardar .txt</string>
     <string name="share">Compartir</string>
+    <string name="cancel">Cancelar</string>
     <string name="model">Modelo</string>
     <string name="language">Idioma</string>
     <string name="no_file">Ningún archivo seleccionado</string>
     <string name="ready">Listo.</string>
+    <string name="cancelled">Cancelado.</string>
     <string name="result_title">Transcripción</string>
     <string name="result_hint">Aquí aparecerá la transcripción…</string>
 </resources>
