@@ -5,43 +5,36 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.provider.OpenableColumns
 import android.view.View
+import android.view.WindowManager
 import android.widget.ArrayAdapter
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import cl.vtt.transcriptor.databinding.ActivityMainBinding
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 class MainActivity : AppCompatActivity() {
 
     private lateinit var b: ActivityMainBinding
-    private val transcriber = Transcriber()
+    private val viewModel: TranscribeViewModel by viewModels()
 
     // Etiquetas visibles e idiomas (código ISO; "" = detección automática).
     private val langLabels = listOf("Español", "Inglés", "Portugués", "Francés", "Detección automática")
     private val langCodes = listOf("es", "en", "pt", "fr", "")
 
     private var selectedUri: Uri? = null
-    private var working = false
 
     private val pickAudio =
         registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-            if (uri != null) {
-                try {
-                    contentResolver.takePersistableUriPermission(
-                        uri, Intent.FLAG_GRANT_READ_URI_PERMISSION
-                    )
-                } catch (_: Exception) { /* algunos proveedores no lo permiten */ }
-                selectedUri = uri
-                b.txtFile.text = displayName(uri)
-                b.btnTranscribe.isEnabled = true
-            }
+            if (uri != null) tomarUri(uri)
         }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -70,13 +63,15 @@ class MainActivity : AppCompatActivity() {
 
         b.btnTranscribe.setOnClickListener {
             val uri = selectedUri ?: return@setOnClickListener
+            if (viewModel.isWorking) return@setOnClickListener
             val model = b.ddModel.text.toString().takeIf { it in ModelManager.MODELS } ?: "base"
             val langPos = langLabels.indexOf(b.ddLanguage.text.toString()).coerceAtLeast(0)
             prefs.edit()
                 .putString("model", model)
                 .putInt("lang", langPos)
                 .apply()
-            startTranscription(uri, model, langCodes[langPos])
+            b.txtResult.setText("")
+            viewModel.transcribe(applicationContext, uri, model, langCodes[langPos])
         }
 
         b.btnCopy.setOnClickListener {
@@ -92,56 +87,78 @@ class MainActivity : AppCompatActivity() {
             }
             startActivity(Intent.createChooser(send, "Compartir transcripción"))
         }
-    }
 
-    private fun startTranscription(uri: Uri, model: String, lang: String) {
-        if (working) return
-        working = true
-        setBusy(true)
-        b.txtResult.setText("")
-        b.btnCopy.isEnabled = false
-        b.btnShare.isEnabled = false
+        manejarIntentEntrante(intent)
 
         lifecycleScope.launch {
-            try {
-                // 1) Asegurar el modelo (descarga solo la primera vez).
-                if (!ModelManager.isDownloaded(this@MainActivity, model)) {
-                    setStatus("Descargando modelo '$model' (solo la primera vez)…")
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                viewModel.uiState.collect { estado -> render(estado) }
+            }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        manejarIntentEntrante(intent)
+    }
+
+    /** Recibe audio/video compartido desde otra app ("Compartir" -> Transcriptor VtT). */
+    private fun manejarIntentEntrante(intent: Intent) {
+        val uri: Uri? = when (intent.action) {
+            Intent.ACTION_SEND ->
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
+                } else {
+                    @Suppress("DEPRECATION")
+                    intent.getParcelableExtra(Intent.EXTRA_STREAM)
+                }
+            Intent.ACTION_VIEW -> intent.data
+            else -> null
+        }
+        if (uri != null) tomarUri(uri)
+    }
+
+    private fun tomarUri(uri: Uri) {
+        try {
+            contentResolver.takePersistableUriPermission(
+                uri, Intent.FLAG_GRANT_READ_URI_PERMISSION
+            )
+        } catch (_: Exception) { /* algunos proveedores (p.ej. de otra app) no lo permiten */ }
+        selectedUri = uri
+        b.txtFile.text = displayName(uri)
+        b.btnTranscribe.isEnabled = !viewModel.isWorking
+    }
+
+    private fun render(estado: TranscribeUiState) {
+        when (estado) {
+            is TranscribeUiState.Idle -> {
+                setBusy(false)
+                b.txtStatus.text = getString(R.string.ready)
+            }
+            is TranscribeUiState.Working -> {
+                setBusy(true)
+                b.txtStatus.text = estado.message
+                b.btnCopy.isEnabled = false
+                b.btnShare.isEnabled = false
+                if (estado.progressPct != null) {
                     b.progress.isIndeterminate = false
+                    b.progress.progress = estado.progressPct
                 } else {
                     b.progress.isIndeterminate = true
                 }
-                val modelFile = withContext(Dispatchers.IO) {
-                    ModelManager.ensureModel(this@MainActivity, model) { pct ->
-                        lifecycleScope.launch { b.progress.progress = pct }
-                    }
-                }
-
-                // 2) Decodificar el audio a PCM 16 kHz mono.
-                setStatus("Procesando el audio…")
-                b.progress.isIndeterminate = true
-                val audio = withContext(Dispatchers.IO) {
-                    AudioDecoder.decode(this@MainActivity, uri)
-                }
-                if (audio.isEmpty()) throw IllegalStateException("No se pudo leer audio del archivo")
-
-                // 3) Cargar el modelo y transcribir en el dispositivo.
-                setStatus("Transcribiendo en el dispositivo…")
-                val text = withContext(Dispatchers.Default) {
-                    transcriber.loadModel(modelFile.absolutePath, model)
-                    transcriber.transcribe(audio, lang.ifEmpty { null })
-                }
-
-                b.txtResult.setText(text)
-                b.btnCopy.isEnabled = text.isNotEmpty()
-                b.btnShare.isEnabled = text.isNotEmpty()
-                setStatus(if (text.isEmpty()) "No se detectó voz." else "Listo.")
-            } catch (e: Exception) {
-                setStatus("Error: ${e.message}")
-                Toast.makeText(this@MainActivity, e.message ?: "Error", Toast.LENGTH_LONG).show()
-            } finally {
-                working = false
+            }
+            is TranscribeUiState.Done -> {
                 setBusy(false)
+                b.txtResult.setText(estado.text)
+                b.btnCopy.isEnabled = estado.text.isNotEmpty()
+                b.btnShare.isEnabled = estado.text.isNotEmpty()
+                b.txtStatus.text = if (estado.text.isEmpty()) "No se detectó voz." else "Listo."
+            }
+            is TranscribeUiState.Error -> {
+                setBusy(false)
+                b.txtStatus.text = "Error: ${estado.message}"
+                Toast.makeText(this, estado.message, Toast.LENGTH_LONG).show()
+                viewModel.descartarError()
             }
         }
     }
@@ -152,10 +169,12 @@ class MainActivity : AppCompatActivity() {
         b.btnSelect.isEnabled = !busy
         b.tilModel.isEnabled = !busy
         b.tilLanguage.isEnabled = !busy
-    }
-
-    private fun setStatus(msg: String) {
-        b.txtStatus.text = msg
+        // Evita que la pantalla se apague durante una transcripcion larga.
+        if (busy) {
+            window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        } else {
+            window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
     }
 
     private fun displayName(uri: Uri): String {
@@ -167,10 +186,5 @@ class MainActivity : AppCompatActivity() {
             }
         } catch (_: Exception) { /* usar el respaldo */ }
         return name
-    }
-
-    override fun onDestroy() {
-        super.onDestroy()
-        transcriber.free()
     }
 }
