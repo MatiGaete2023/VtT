@@ -53,6 +53,12 @@ en tu equipo. A partir de ahí funciona **sin conexión**.
   estado indica un **tiempo restante estimado**.
 - No necesita FFmpeg para transcribir (lo decodifica internamente). FFmpeg solo
   mejora, opcionalmente, las descargas de YouTube.
+- **Arrastra y suelta** archivos de audio/video directo sobre la lista (necesita
+  el paquete opcional `tkinterdnd2`, ver abajo).
+- Atajos de teclado: **Ctrl+O** agrega archivos, **Ctrl+R** graba/detiene,
+  **Ctrl+Enter** transcribe (en macOS también funcionan con ⌘).
+- **Historial** (botón junto a "Abrir carpeta de salida"): accede rápido a las
+  últimas 10 carpetas donde se guardaron transcripciones.
 
 ## Grabar micrófono o audio del sistema (Chrome, apps, etc.)
 
@@ -88,6 +94,20 @@ transcripción arranque sola con la configuración actual (modelo, idioma, forma
 > micrófono, `soundcard` para audio de sistema en Windows), la app lo instala **en
 > segundo plano con un clic**, sin congelar la ventana. En Linux necesitas además:
 > `sudo apt install libportaudio2`.
+
+## Arrastrar y soltar (opcional)
+
+Para agregar audios arrastrándolos directo desde el explorador de archivos,
+instala una vez el paquete opcional `tkinterdnd2`:
+
+```
+python -m pip install tkinterdnd2
+```
+
+(o edítalo dentro del entorno: `.venv/bin/pip install tkinterdnd2` en macOS/Linux,
+`.venv\Scripts\pip install tkinterdnd2` en Windows). No es obligatorio: sin él, la
+app funciona igual, simplemente sin esa función — no se agregó a `requirements.txt`
+para no sumar una dependencia que no todos necesitan.
 
 ## Dónde quedan las grabaciones y transcripciones
 

@@ -158,3 +158,21 @@ def test_es_temporal_false_sin_temp_dirs(tmp_path):
 def test_carpetas_persistentes_existen():
     assert tw.CARPETA_GRABACIONES.is_dir()
     assert tw.CARPETA_TRANSCRIPCIONES.is_dir()
+
+
+# ---------- historial de carpetas de salida ----------
+
+def test_registrar_salida_dedupe_y_orden():
+    fake = SimpleNamespace(historial_salidas=[], _snapshot_config=lambda: None)
+    tw.TranscriptorApp._registrar_salida(fake, "/a")
+    tw.TranscriptorApp._registrar_salida(fake, "/b")
+    tw.TranscriptorApp._registrar_salida(fake, "/a")  # ya estaba: vuelve al frente
+    assert fake.historial_salidas == ["/a", "/b"]
+
+
+def test_registrar_salida_tope_10():
+    fake = SimpleNamespace(historial_salidas=[], _snapshot_config=lambda: None)
+    for i in range(15):
+        tw.TranscriptorApp._registrar_salida(fake, f"/carpeta{i}")
+    assert len(fake.historial_salidas) == 10
+    assert fake.historial_salidas[0] == "/carpeta14"  # la mas reciente va primero

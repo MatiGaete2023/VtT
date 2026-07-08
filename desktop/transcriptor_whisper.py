@@ -180,11 +180,12 @@ def guardar_config(d):
 
 
 class TranscriptorApp:
-    def __init__(self, root):
+    def __init__(self, root, dnd_disponible=False):
         self.root = root
         self.root.title("Transcriptor Whisper v2")
         self.root.geometry("820x780")
         self.root.minsize(720, 660)
+        self.dnd_disponible = dnd_disponible
 
         self.cola = queue.Queue()
         self.archivos = []
@@ -194,6 +195,7 @@ class TranscriptorApp:
         self.transcribiendo = False
         self.bajando_yt = False
         self.ultima_salida = None
+        self.historial_salidas = []
         self.cancelar = threading.Event()
         self.temp_dirs = []
         self.estado_actual = "neutro"   # para que _finalizar() sepa que no pisar (ok/error/cancelado)
@@ -280,7 +282,9 @@ class TranscriptorApp:
         ttk.Checkbutton(fr_rec, text="Transcribir automáticamente al detener",
                         variable=self.v_auto_transcribir).pack(side="left", padx=(12, 0))
 
-        fr_files = ttk.LabelFrame(cont, text="Archivos de audio / video", padding=8)
+        titulo_files = "Archivos de audio / video (arrastra y suelta aqui)" \
+            if self.dnd_disponible else "Archivos de audio / video"
+        fr_files = ttk.LabelFrame(cont, text=titulo_files, padding=8)
         fr_files.pack(fill="both", expand=True, **pad)
         self.lst = tk.Listbox(fr_files, height=6, selectmode="extended",
                               bg=self.paleta["surface"], fg=self.paleta["text"], borderwidth=0,
@@ -291,6 +295,10 @@ class TranscriptorApp:
         sb = ttk.Scrollbar(fr_files, orient="vertical", command=self.lst.yview)
         sb.pack(side="left", fill="y")
         self.lst.config(yscrollcommand=sb.set)
+        if self.dnd_disponible:
+            from tkinterdnd2 import DND_FILES
+            self.lst.drop_target_register(DND_FILES)
+            self.lst.dnd_bind("<<Drop>>", self._on_drop)
         fr_b = ttk.Frame(fr_files)
         fr_b.pack(side="right", fill="y", padx=(8, 0))
         ttk.Button(fr_b, text="Agregar", command=self._agregar).pack(fill="x", pady=2)
@@ -342,6 +350,10 @@ class TranscriptorApp:
         self.btn_cancel.pack(side="left", padx=8)
         self.btn_open = ttk.Button(fr_a, text="Abrir carpeta de salida", command=self._abrir_salida, state="disabled")
         self.btn_open.pack(side="left", padx=8)
+        self.menu_historial = tk.Menu(
+            self.root, tearoff=False, postcommand=self._refrescar_menu_historial)
+        self.btn_historial = ttk.Menubutton(fr_a, text="Historial ▾", menu=self.menu_historial)
+        self.btn_historial.pack(side="left")
         self.pb = ttk.Progressbar(fr_a, mode="determinate", maximum=100, length=200)
         self.pb.pack(side="right", fill="x", expand=True, padx=8)
 
@@ -356,6 +368,22 @@ class TranscriptorApp:
                                              insertbackground=self.paleta["text"])
         self.log.pack(fill="both", expand=True)
 
+        self._atajos_teclado()
+
+    def _atajos_teclado(self):
+        """Ctrl+O agrega archivos, Ctrl+R graba/detiene, Ctrl+Enter transcribe.
+        Se enlazan tambien con el modificador Command para que funcionen igual
+        en macOS (en Windows/Linux esas combinaciones simplemente no existen,
+        asi que el bind no hace nada alli)."""
+        atajos = {
+            "o": lambda e: self._agregar(),
+            "r": lambda e: self._toggle_grabar(),
+            "Return": lambda e: self._iniciar(),
+        }
+        for tecla, accion in atajos.items():
+            self.root.bind_all(f"<Control-{tecla}>", accion)
+            self.root.bind_all(f"<Command-{tecla}>", accion)
+
     def _aplicar_config(self):
         c = self.cfg
         if c.get("modelo") in MODELOS:
@@ -364,6 +392,8 @@ class TranscriptorApp:
             self.cmb_i.set(c["idioma"])
         if c.get("salida"):
             self.v_out.set(c["salida"])
+        if isinstance(c.get("historial_salidas"), list):
+            self.historial_salidas = [str(x) for x in c["historial_salidas"]][:10]
         for k, var in [("txt", self.v_txt), ("md", self.v_md), ("srt", self.v_srt),
                        ("vtt", self.v_vtt), ("vad", self.v_vad), ("words", self.v_words),
                        ("auto_transcribir", self.v_auto_transcribir)]:
@@ -380,6 +410,7 @@ class TranscriptorApp:
             "vad": self.v_vad.get(), "words": self.v_words.get(),
             "auto_transcribir": self.v_auto_transcribir.get(),
             "tema": "oscuro" if self.tema_oscuro else "claro",
+            "historial_salidas": self.historial_salidas,
         })
 
     def _init_ffmpeg(self):
@@ -407,6 +438,18 @@ class TranscriptorApp:
         for r in rutas:
             self._insertar_archivo(r)
 
+    def _on_drop(self, event):
+        """Arrastrar y soltar archivos sobre la lista (requiere tkinterdnd2).
+        event.data es una cadena Tcl con las rutas; splitlist la separa
+        respetando rutas con espacios o llaves."""
+        agregados = 0
+        for ruta in self.lst.tk.splitlist(event.data):
+            if os.path.isfile(ruta) and Path(ruta).suffix.lower() in EXTS:
+                self._insertar_archivo(ruta)
+                agregados += 1
+        if agregados:
+            self._escribe(f"{agregados} archivo(s) agregado(s) por arrastrar y soltar.")
+
     def _insertar_archivo(self, r):
         if r not in self.archivos:
             self.archivos.append(r)
@@ -430,6 +473,30 @@ class TranscriptorApp:
         if self.ultima_salida and os.path.isdir(self.ultima_salida):
             if not abrir_en_explorador(self.ultima_salida):
                 messagebox.showinfo("Carpeta de salida", self.ultima_salida)
+
+    def _registrar_salida(self, carpeta):
+        """Agrega `carpeta` al historial (mas reciente primero, sin duplicados,
+        maximo 10) y lo persiste."""
+        if carpeta in self.historial_salidas:
+            self.historial_salidas.remove(carpeta)
+        self.historial_salidas.insert(0, carpeta)
+        del self.historial_salidas[10:]
+        self._snapshot_config()
+
+    def _refrescar_menu_historial(self):
+        self.menu_historial.delete(0, "end")
+        vigentes = [c for c in self.historial_salidas if os.path.isdir(c)]
+        if not vigentes:
+            self.menu_historial.add_command(label="(sin historial todavia)", state="disabled")
+            return
+        for carpeta in vigentes:
+            etiqueta = carpeta if len(carpeta) <= 60 else "…" + carpeta[-57:]
+            self.menu_historial.add_command(
+                label=etiqueta, command=lambda c=carpeta: self._abrir_carpeta_historial(c))
+
+    def _abrir_carpeta_historial(self, carpeta):
+        if not abrir_en_explorador(carpeta):
+            messagebox.showinfo("Carpeta de salida", carpeta)
 
     def _descargar_yt(self):
         if self.bajando_yt:
@@ -977,6 +1044,7 @@ class TranscriptorApp:
                 else:
                     base = Path(archivo).parent
                 self.ultima_salida = str(base)
+                self.cola.put(("salida_nueva", str(base)))
                 escritos = self._escribir_salidas(base, archivo, modelo, idioma, texto, segs, formatos)
                 self.cola.put(("progress", 100))
                 for e in escritos:
@@ -1068,6 +1136,8 @@ class TranscriptorApp:
                     inicio, fin, texto = p[0]
                     self._escribe(f"  [{ts_simple(inicio)} -> {ts_simple(fin)}] {texto.strip()}")
                     self._actualizar_eta(fin)
+                elif tipo == "salida_nueva":
+                    self._registrar_salida(p[0])
                 elif tipo == "error":
                     self._escribe("ERROR:\n" + p[0])
                     self._set_estado("Error. Revisa el registro.", "error")
@@ -1235,8 +1305,17 @@ def _aplicar_estilo(root, paleta):
 
 
 def main():
-    root = tk.Tk()
-    TranscriptorApp(root)
+    # Arrastrar y soltar es opcional: si el paquete 'tkinterdnd2' esta
+    # instalado se activa; si no, la app funciona igual sin esa funcion (no
+    # es una dependencia obligatoria, para no complicar la instalacion).
+    try:
+        from tkinterdnd2 import TkinterDnD
+        root = TkinterDnD.Tk()
+        dnd_disponible = True
+    except Exception:
+        root = tk.Tk()
+        dnd_disponible = False
+    TranscriptorApp(root, dnd_disponible)
     root.mainloop()
 
 
