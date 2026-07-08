@@ -4,6 +4,7 @@ import android.content.Context
 import android.media.MediaCodec
 import android.media.MediaExtractor
 import android.media.MediaFormat
+import android.media.MediaMetadataRetriever
 import android.net.Uri
 import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
@@ -13,12 +14,34 @@ import java.nio.ByteOrder
  * Decodifica cualquier audio/video soportado por Android (mp3, m4a, aac, ogg,
  * wav, mp4, etc.) a PCM float mono normalizado [-1, 1] a 16 kHz, que es lo que
  * espera whisper.cpp.
+ *
+ * Nota: `decode()` mantiene todo el audio en memoria como FloatArray (4 bytes
+ * por muestra, ~230 MB por hora a 16 kHz). Para audios muy largos (varias
+ * horas) esto puede agotar la memoria del proceso; el llamador debe capturar
+ * OutOfMemoryError (ver TranscribeViewModel) y sugerir un archivo más corto.
  */
 object AudioDecoder {
 
     const val TARGET_RATE = 16_000
 
     private class Pcm(val bytes: ByteArray, val sampleRate: Int, val channels: Int)
+
+    /** Duracion aproximada en segundos via metadata (barato, no decodifica el
+     * archivo). Devuelve null si no se pudo determinar. */
+    fun duracionSegundos(context: Context, uri: Uri): Long? {
+        val retriever = MediaMetadataRetriever()
+        return try {
+            retriever.setDataSource(context, uri)
+            retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+                ?.toLongOrNull()?.let { it / 1000 }
+        } catch (_: Exception) {
+            null
+        } finally {
+            try {
+                retriever.release()
+            } catch (_: Exception) { /* nada mas que hacer */ }
+        }
+    }
 
     fun decode(context: Context, uri: Uri): FloatArray {
         val extractor = MediaExtractor()

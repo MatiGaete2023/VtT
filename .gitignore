@@ -18,6 +18,9 @@ android/.cxx/
 android/captures/
 *.apk
 *.aab
+android/keystore.properties
+android/*.jks
+android/*.keystore
 
 # ---- IDE / OS ----
 .idea/

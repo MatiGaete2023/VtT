@@ -58,6 +58,48 @@ No necesitas instalar nada de desarrollo. El APK lo construye GitHub Actions:
 La primera compilación descarga whisper.cpp (vía CMake `FetchContent`) y compila la
 parte nativa; puede tardar varios minutos.
 
+## Firmar un APK de release (opcional)
+
+El APK debug (el que usan los pasos de arriba) ya se puede instalar directamente;
+esto es solo para publicar un APK de **release** firmado con tu propia clave.
+
+1. Genera una clave una sola vez (guárdala en un lugar seguro, **no** en el repo):
+
+   ```sh
+   keytool -genkeypair -v -keystore release.jks -alias vtt \
+     -keyalg RSA -keysize 2048 -validity 10000 \
+     -storepass "TU_CLAVE_DE_ALMACEN" -keypass "TU_CLAVE_DE_LLAVE" \
+     -dname "CN=Tu Nombre, OU=, O=, L=, S=, C=CL"
+   ```
+
+2. En GitHub, ve a **Settings → Secrets and variables → Actions** del repositorio
+   y agrega 4 *secrets*:
+
+   | Secret | Valor |
+   |---|---|
+   | `ANDROID_KEYSTORE_B64` | `base64 -w0 release.jks` (el archivo completo en base64) |
+   | `ANDROID_KEYSTORE_PASSWORD` | la clave de almacén (`-storepass`) |
+   | `ANDROID_KEY_ALIAS` | el alias (`vtt` en el ejemplo) |
+   | `ANDROID_KEY_PASSWORD` | la clave de la llave (`-keypass`) |
+
+3. Listo: el job **"Build signed release APK (opcional)"** del workflow "Android APK"
+   se activa solo cuando esos secrets existen (si no, se omite sin romper nada) y
+   sube el artefacto `TranscriptorVtT-release-apk`.
+
+Para compilar el release firmado en tu equipo en vez de en CI, crea
+`android/keystore.properties` (no se versiona) con:
+
+```properties
+storeFile=release.jks
+storePassword=TU_CLAVE_DE_ALMACEN
+keyAlias=vtt
+keyPassword=TU_CLAVE_DE_LLAVE
+```
+
+y ejecuta `./gradlew assembleRelease` en `android/`. Sin ese archivo, `assembleRelease`
+igual compila (sin firmar), así que nadie sin la clave se queda sin poder construir
+el proyecto.
+
 ## Detalles técnicos
 
 - Núcleo nativo: `whisper.cpp` (tag `v1.7.4`), compilado con el NDK para `arm64-v8a`.

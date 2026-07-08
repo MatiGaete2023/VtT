@@ -33,6 +33,10 @@ sealed interface TranscribeUiState {
  */
 class TranscribeViewModel : ViewModel() {
 
+    companion object {
+        private const val UMBRAL_AUDIO_LARGO_S = 90 * 60L  // 90 min
+    }
+
     private val transcriber = Transcriber()
 
     private val _uiState = MutableStateFlow<TranscribeUiState>(TranscribeUiState.Idle)
@@ -62,7 +66,15 @@ class TranscribeViewModel : ViewModel() {
                     }
                 }
 
-                _uiState.value = TranscribeUiState.Working("Procesando el audio…", null)
+                val duracion = withContext(Dispatchers.IO) {
+                    AudioDecoder.duracionSegundos(appContext, uri)
+                }
+                val avisoLargo = if (duracion != null && duracion > UMBRAL_AUDIO_LARGO_S) {
+                    " (~${duracion / 60} min, puede tardar y usar bastante memoria)"
+                } else {
+                    ""
+                }
+                _uiState.value = TranscribeUiState.Working("Procesando el audio…$avisoLargo", null)
                 val audio = withContext(Dispatchers.IO) {
                     AudioDecoder.decode(appContext, uri)
                 }
@@ -86,6 +98,14 @@ class TranscribeViewModel : ViewModel() {
                 }
             } catch (e: CancellationException) {
                 throw e  // no interferir con la cancelacion estructurada de corutinas
+            } catch (e: OutOfMemoryError) {
+                // Un audio muy largo (horas) puede agotar la memoria del proceso:
+                // decodificarlo entero a PCM float ocupa varias veces su duracion en
+                // MB. OutOfMemoryError es un Error, no una Exception, así que sin este
+                // catch especifico se escapaba del try/catch de abajo y tumbaba la app.
+                _uiState.value = TranscribeUiState.Error(
+                    "El audio es demasiado largo para la memoria disponible. " +
+                    "Prueba con un archivo más corto o un modelo más liviano (tiny/base).")
             } catch (e: Exception) {
                 _uiState.value = if (cancelSolicitado) {
                     TranscribeUiState.Cancelled

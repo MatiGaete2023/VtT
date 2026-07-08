@@ -3,6 +3,17 @@ plugins {
     id 'org.jetbrains.kotlin.android'
 }
 
+// Firma de release opcional: si existe android/keystore.properties (no se
+// versiona, ver .gitignore), se firma el APK de release con esa clave. Sin
+// ese archivo, 'assembleRelease' sigue compilando igual (sin firmar), asi
+// que nadie sin la clave se queda sin poder construir el proyecto.
+def keystorePropertiesFile = rootProject.file('keystore.properties')
+def keystoreProperties = new Properties()
+def tieneKeystore = keystorePropertiesFile.exists()
+if (tieneKeystore) {
+    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+}
+
 android {
     namespace 'cl.vtt.transcriptor'
     compileSdk 34
@@ -35,6 +46,17 @@ android {
         }
     }
 
+    signingConfigs {
+        if (tieneKeystore) {
+            release {
+                storeFile rootProject.file(keystoreProperties['storeFile'])
+                storePassword keystoreProperties['storePassword']
+                keyAlias keystoreProperties['keyAlias']
+                keyPassword keystoreProperties['keyPassword']
+            }
+        }
+    }
+
     buildTypes {
         debug {
             // El APK de depuracion se firma con la clave de debug:
@@ -44,6 +66,9 @@ android {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            if (tieneKeystore) {
+                signingConfig signingConfigs.release
+            }
         }
     }
 
