@@ -75,24 +75,41 @@ jobs:
   build-release:
     name: Build signed release APK (opcional)
     runs-on: ubuntu-latest
-    # Solo corre si el repositorio tiene configurado el secreto del keystore
-    # (ver android/README.md → "Firmar un APK de release"). Sin ese secreto,
-    # este job se omite solo y no rompe nada.
-    if: ${{ github.event_name != 'pull_request' && secrets.ANDROID_KEYSTORE_B64 != '' }}
+    if: github.event_name != 'pull_request'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # Gatea el resto de los pasos por salida de step (no por 'secrets' en un
+      # 'if:' de job), para evitar cualquier ambiguedad: si el repositorio no
+      # tiene configurado el keystore, los pasos siguientes se saltan solos y
+      # el job igual termina en verde (no roto, solo sin producir un release
+      # firmado). Ver android/README.md -> "Firmar un APK de release".
+      - name: Verificar si hay keystore configurado
+        id: check
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "tiene_keystore=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "tiene_keystore=false" >> "$GITHUB_OUTPUT"
+            echo "No hay keystore configurado (secrets.ANDROID_KEYSTORE_B64 vacío); se omite el release firmado."
+          fi
+
       - name: Set up JDK 17
+        if: steps.check.outputs.tiene_keystore == 'true'
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
 
       - name: Set up Android SDK
+        if: steps.check.outputs.tiene_keystore == 'true'
         uses: android-actions/setup-android@v3
 
       - name: Install NDK and CMake
+        if: steps.check.outputs.tiene_keystore == 'true'
         run: |
           yes | sdkmanager --install \
             "platforms;android-34" \
@@ -101,11 +118,13 @@ jobs:
             "cmake;3.22.1"
 
       - name: Set up Gradle
+        if: steps.check.outputs.tiene_keystore == 'true'
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.7"
 
       - name: Preparar el keystore desde los secretos
+        if: steps.check.outputs.tiene_keystore == 'true'
         working-directory: android
         env:
           KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
@@ -122,10 +141,12 @@ jobs:
           } > keystore.properties
 
       - name: Build signed release APK
+        if: steps.check.outputs.tiene_keystore == 'true'
         working-directory: android
         run: gradle assembleRelease --no-daemon --stacktrace
 
       - name: Upload signed APK artifact
+        if: steps.check.outputs.tiene_keystore == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: TranscriptorVtT-release-apk
