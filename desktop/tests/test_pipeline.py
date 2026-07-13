@@ -19,6 +19,19 @@ sys.path.insert(0, str(DESKTOP_DIR))
 import transcriptor_whisper as tw  # noqa: E402
 
 
+# ---------- entradas de audio para la UI ----------
+
+def test_etiquetas_entradas_audio_usa_tuplas_de_cinco_campos():
+    entradas = [
+        ("sd", 3, "🎤 Micrófono WASAPI", False, 1),
+        ("sc", "altavoces", "🔊 Altavoces (audio del sistema)", True, 2),
+    ]
+    assert tw.etiquetas_entradas_audio(entradas) == [
+        "🎤 Micrófono WASAPI",
+        "🔊 Altavoces (audio del sistema)",
+    ]
+
+
 # ---------- envolver_texto (ajuste de lineas del .txt/.md) ----------
 
 def test_envolver_texto_respeta_ancho():

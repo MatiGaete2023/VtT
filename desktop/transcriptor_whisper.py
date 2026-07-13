@@ -154,6 +154,15 @@ def ruta_dentro_de(ruta, carpeta):
         return False
 
 
+def etiquetas_entradas_audio(entradas):
+    """Devuelve solo las etiquetas visibles de las tuplas de entrada.
+
+    Las entradas tienen 5 campos: (origen, id, etiqueta, is_loopback, max_canales).
+    Centralizar esto evita desempaquetados incompletos al poblar la UI.
+    """
+    return [entrada[2] for entrada in entradas]
+
+
 def abrir_en_explorador(ruta):
     """Abre una carpeta en el explorador de archivos del sistema (Windows/macOS/Linux)."""
     try:
@@ -281,7 +290,7 @@ class TranscriptorApp:
         self.entradas = self._dispositivos_entrada()
         self.cmb_dev["values"] = (
             ["🎤 Predeterminada (micrófono)"]
-            + [lbl for _, lbl, _, _ in self.entradas]
+            + etiquetas_entradas_audio(self.entradas)
         )
         self.cmb_dev.current(0)
         self.btn_grab = ttk.Button(fr_rec, text="●  Grabar", command=self._toggle_grabar)
