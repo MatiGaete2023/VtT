@@ -148,6 +148,27 @@ def test_es_temporal_false_para_archivo_fuera_de_temp(tmp_path):
     assert tw.TranscriptorApp._es_temporal(fake, str(archivo)) is False
 
 
+def test_ruta_dentro_de_rechaza_prefijo_con_nombre_parecido(tmp_path):
+    temp_real = tmp_path / "temp"
+    temp_real.mkdir()
+    temp_prefijo = tmp_path / "temp_otro"
+    temp_prefijo.mkdir()
+    archivo = temp_prefijo / "normal.mp3"
+    archivo.write_bytes(b"")
+    assert tw.ruta_dentro_de(archivo, temp_real) is False
+
+
+def test_es_temporal_false_para_prefijo_con_nombre_parecido(tmp_path):
+    temp_real = tmp_path / "temp"
+    temp_real.mkdir()
+    temp_prefijo = tmp_path / "temp_otro"
+    temp_prefijo.mkdir()
+    fake = SimpleNamespace(temp_dirs=[str(temp_real)])
+    archivo = temp_prefijo / "normal.mp3"
+    archivo.write_bytes(b"")
+    assert tw.TranscriptorApp._es_temporal(fake, str(archivo)) is False
+
+
 def test_es_temporal_false_sin_temp_dirs(tmp_path):
     fake = SimpleNamespace(temp_dirs=[])
     archivo = tmp_path / "normal.mp3"

@@ -140,6 +140,20 @@ def envolver_texto(texto, ancho=ANCHO_TXT):
     return "\n".join(salida)
 
 
+def ruta_dentro_de(ruta, carpeta):
+    """True si `ruta` esta dentro de `carpeta` (o es la misma ruta).
+
+    Usa `commonpath` en vez de comparar prefijos de texto: `/tmp/a2` no debe
+    considerarse dentro de `/tmp/a`.
+    """
+    try:
+        ruta_abs = os.path.abspath(os.fspath(ruta))
+        carpeta_abs = os.path.abspath(os.fspath(carpeta))
+        return os.path.commonpath([ruta_abs, carpeta_abs]) == carpeta_abs
+    except (OSError, ValueError, TypeError):
+        return False
+
+
 def abrir_en_explorador(ruta):
     """Abre una carpeta en el explorador de archivos del sistema (Windows/macOS/Linux)."""
     try:
@@ -987,15 +1001,7 @@ class TranscriptorApp:
     def _es_temporal(self, archivo):
         """True si `archivo` vive dentro de una carpeta temporal (p.ej. descarga
         de YouTube) que se borrara al cerrar la app."""
-        try:
-            ruta = Path(archivo).resolve()
-            return any(ruta.is_relative_to(Path(d).resolve()) for d in self.temp_dirs)
-        except AttributeError:
-            # Python < 3.9 no tiene is_relative_to.
-            ruta_s = str(Path(archivo).resolve())
-            return any(ruta_s.startswith(str(Path(d).resolve())) for d in self.temp_dirs)
-        except Exception:
-            return False
+        return any(ruta_dentro_de(archivo, d) for d in self.temp_dirs)
 
     def _worker(self, archivos, modelo, idioma, salida, formatos, vad, words):
         try:
