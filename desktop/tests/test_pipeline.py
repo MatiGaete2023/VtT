@@ -5,6 +5,7 @@ funciones), nunca a nivel de modulo, asi que este archivo tampoco los necesita.
 import array
 import hashlib
 import importlib.util
+import json
 import math
 import queue
 import sys
@@ -210,3 +211,75 @@ def test_registrar_salida_tope_10():
         tw.TranscriptorApp._registrar_salida(fake, f"/carpeta{i}")
     assert len(fake.historial_salidas) == 10
     assert fake.historial_salidas[0] == "/carpeta14"  # la mas reciente va primero
+
+
+# ---------- exportacion segura ----------
+
+def test_exportacion_conserva_puntos_del_nombre_y_no_sobrescribe(tmp_path):
+    app = SimpleNamespace()
+    app._tronco_salida_disponible = tw.TranscriptorApp._tronco_salida_disponible
+    formatos = {"txt": True, "md": False, "srt": False, "vtt": False}
+
+    primero = tw.TranscriptorApp._escribir_salidas(app, tmp_path, "audiencia.01.wav", "base", "es",
+                                                   "primero", [], formatos)
+    segundo = tw.TranscriptorApp._escribir_salidas(app, tmp_path, "audiencia.01.wav", "base", "es",
+                                                   "segundo", [], formatos)
+
+    assert primero == ["audiencia.01.txt"]
+    assert segundo == ["audiencia.01 (2).txt"]
+    assert (tmp_path / "audiencia.01.txt").read_text(encoding="utf-8").strip() == "primero"
+    assert (tmp_path / "audiencia.01 (2).txt").read_text(encoding="utf-8").strip() == "segundo"
+
+
+def test_exportacion_no_colisiona_con_mismo_nombre_de_carpetas_distintas(tmp_path):
+    app = SimpleNamespace()
+    app._tronco_salida_disponible = tw.TranscriptorApp._tronco_salida_disponible
+    formatos = {"txt": True, "md": False, "srt": False, "vtt": False}
+    tw.TranscriptorApp._escribir_salidas(app, tmp_path, "/origen/a.wav", "base", "es", "A", [], formatos)
+    escritos = tw.TranscriptorApp._escribir_salidas(app, tmp_path, "/otro/borrador/a.wav", "base", "es", "B", [], formatos)
+    assert escritos == ["a (2).txt"]
+    assert sorted(p.name for p in tmp_path.glob("a*.txt")) == ["a (2).txt", "a.txt"]
+
+
+def test_json_conserva_segmentos_palabras_y_campo_de_hablante():
+    app = SimpleNamespace()
+    palabra = SimpleNamespace(start=0.1, end=0.4, word=" Hola", probability=0.98)
+    segmento = SimpleNamespace(start=0.0, end=1.2, text=" Hola", words=[palabra])
+    documento = json.loads(tw.TranscriptorApp._fmt_json(
+        app, "audio.wav", "base", "es", "Hola", [segmento]))
+    assert documento["schema_version"] == 1
+    assert documento["segments"][0]["words"][0]["start"] == 0.1
+    assert documento["segments"][0]["speaker"] is None
+
+
+def test_exportacion_por_lote_continua_despues_de_error(tmp_path, monkeypatch):
+    """El error de un archivo no debe cancelar el resto del lote."""
+    app = SimpleNamespace()
+    app.modelo = None
+    app.modelo_nombre = None
+    app.cancelar = threading.Event()
+    app.temp_dirs = []
+    app.cola = queue.Queue()
+    app.ultima_salida = None
+    app.dur_actual = 0
+    app.t_transcripcion_inicio = 0
+    app._es_temporal = lambda archivo: False
+    app._escribir_salidas = lambda *args: [Path(args[1]).stem + ".txt"]
+
+    class Modelo:
+        def transcribe(self, archivo, **kwargs):
+            if str(archivo).endswith("malo.wav"):
+                raise ValueError("audio no legible")
+            return iter([SimpleNamespace(start=0, end=1, text="ok")]), SimpleNamespace(duration=1)
+
+    app.modelo = Modelo()
+    app.modelo_nombre = "base"
+    fake_fw = SimpleNamespace(WhisperModel=lambda *args, **kwargs: app.modelo)
+    monkeypatch.setitem(sys.modules, "faster_whisper", fake_fw)
+    tw.TranscriptorApp._worker(app,
+                               [str(tmp_path / "uno.wav"), str(tmp_path / "malo.wav"),
+                                str(tmp_path / "tres.wav")], "base", "es", str(tmp_path),
+                               {"txt": True, "md": False, "srt": False, "vtt": False}, True, False)
+    eventos = list(app.cola.queue)
+    assert [e[0] for e in eventos].count("archivo_fallido") == 1
+    assert any(e[0] == "log" and "=== Completado ===" in e[1] for e in eventos)

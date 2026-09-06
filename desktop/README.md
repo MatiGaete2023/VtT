@@ -47,8 +47,14 @@ en tu equipo. A partir de ahí funciona **sin conexión**.
 - **Modo claro / oscuro**: botón 🌙/☀️ arriba a la derecha; se recuerda entre sesiones.
 - Modelos: `tiny`, `base`, `small`, `medium`, `large-v3` (más grande = más preciso y más lento).
 - Idiomas: español, inglés, portugués, francés o detección automática.
-- Exporta a `.txt`, `.md` (Obsidian), `.srt` y `.vtt`. El `.txt` viene **ajustado a
-  ~100 caracteres por línea**, para leerlo sin desplazarte hacia el lado.
+- Exporta a `.txt`, `.md` (Obsidian), `.srt`, `.vtt` y `.json` estructurado. El
+  `.txt` viene **ajustado a ~100 caracteres por línea**, para leerlo sin desplazarte
+  hacia el lado. El JSON conserva segmentos, marcas por palabra disponibles y un
+  campo preparado para hablante; activa la opción `.json (tiempos)` para generarlo.
+- Conserva puntos internos del nombre (`audiencia.01`) y crea una copia numerada
+  si la salida ya existe; no sobrescribe una transcripción anterior.
+- Si cancelas después de obtener segmentos, guarda una salida parcial. En un lote,
+  un archivo defectuoso se registra y el programa continúa con los siguientes.
 - Mientras transcribe, el **Registro** muestra cada segmento a medida que sale y el
   estado indica un **tiempo restante estimado**.
 - No necesita FFmpeg para transcribir (lo decodifica internamente). FFmpeg solo
@@ -124,10 +130,12 @@ Ambas carpetas se crean solas junto al programa y no se suben al repositorio.
 
 ## Llevarlo a otro equipo sin descargar de nuevo
 
-Como todo vive dentro de la carpeta, puedes copiarla completa (incluida `.venv` y la
-caché del modelo) a otro PC del **mismo sistema operativo** y funcionará sin internet.
-Para distinto sistema operativo, copia la carpeta **sin** `.venv` y vuelve a ejecutar
-`run.py` allí (recreará el entorno para esa plataforma).
+En la versión ejecutada desde Python, los datos viven dentro de `desktop/`. En un
+ejecutable PyInstaller se guardan junto al ejecutable cuando esa carpeta es escribible;
+si el sistema la protege, se usa la carpeta de datos del usuario. La aplicación no usa
+la carpeta temporal de extracción para grabaciones o transcripciones. Los entornos
+virtuales no son portables entre equipos en general: para otro sistema operativo o una
+instalación de Python incompatible, copia tus datos y vuelve a ejecutar `run.py`.
 
 ## ¿Prefieres un ejecutable sin instalar Python?
 

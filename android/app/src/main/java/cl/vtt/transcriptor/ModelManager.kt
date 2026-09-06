@@ -62,7 +62,12 @@ object ModelManager {
      * corrupto, lo descarga (reanudando una descarga interrumpida si es
      * posible) informando el avance (0..100). Devuelve el archivo del modelo.
      */
-    fun ensureModel(context: Context, model: String, onProgress: (Int) -> Unit): File {
+    fun ensureModel(
+        context: Context,
+        model: String,
+        isCancelled: () -> Boolean = { false },
+        onProgress: (Int) -> Unit
+    ): File {
         val target = modelFile(context, model)
         if (isDownloaded(context, model)) return target
 
@@ -101,6 +106,9 @@ object ModelManager {
                     var descargado = existentes
                     var lastPct = -1
                     while (true) {
+                        if (isCancelled()) {
+                            throw java.util.concurrent.CancellationException("descarga cancelada")
+                        }
                         val leido = input.read(buf)
                         if (leido < 0) break
                         output.write(buf, 0, leido)

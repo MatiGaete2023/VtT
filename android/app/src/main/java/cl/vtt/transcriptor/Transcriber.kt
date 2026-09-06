@@ -1,5 +1,18 @@
 package cl.vtt.transcriptor
 
+import org.json.JSONObject
+
+data class TranscriptionSegment(
+    val startMs: Long,
+    val endMs: Long,
+    val text: String
+)
+
+data class TranscriptionResult(
+    val text: String,
+    val segments: List<TranscriptionSegment>
+)
+
 /**
  * Mantiene cargado el modelo de whisper.cpp y realiza la transcripcion.
  * Reutiliza el modelo entre transcripciones (como en la version de PC).
@@ -40,11 +53,42 @@ class Transcriber {
      * con el avance 0..100, si whisper.cpp lo reporta.
      */
     @Synchronized
-    fun transcribe(audio: FloatArray, lang: String?, onProgress: ((Int) -> Unit)? = null): String {
+    fun transcribe(
+        audio: FloatArray,
+        lang: String?,
+        onProgress: ((Int) -> Unit)? = null
+    ): TranscriptionResult {
         check(ctxPtr != 0L) { "El modelo no esta cargado" }
         val threads = Runtime.getRuntime().availableProcessors().coerceIn(2, 8)
         val listener = onProgress?.let { cb -> WhisperBridge.ProgressListener { pct -> cb(pct) } }
-        return bridge.nativeTranscribe(ctxPtr, audio, lang, threads, listener).trim()
+        val raw = bridge.nativeTranscribe(ctxPtr, audio, lang, threads, listener).trim()
+        when {
+            raw == "__VTT_CANCELLED__" ->
+                throw java.util.concurrent.CancellationException("cancelada")
+            raw.startsWith("__VTT_ERROR__:") ->
+                throw IllegalStateException(raw.removePrefix("__VTT_ERROR__:").ifBlank {
+                    "Error del motor nativo"
+                })
+            else -> {
+                val json = JSONObject(raw)
+                val segmentosJson = json.optJSONArray("segments")
+                val segmentos = buildList {
+                    if (segmentosJson != null) {
+                        for (i in 0 until segmentosJson.length()) {
+                            val item = segmentosJson.optJSONObject(i) ?: continue
+                            add(
+                                TranscriptionSegment(
+                                    item.optLong("startMs"),
+                                    item.optLong("endMs"),
+                                    item.optString("text")
+                                )
+                            )
+                        }
+                    }
+                }
+                TranscriptionResult(json.optString("text"), segmentos)
+            }
+        }
     }
 
     /** Pide cancelar la transcripcion en curso (si hay una). Ver nota de clase. */

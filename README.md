@@ -63,8 +63,9 @@ android/                 App Android nativa (Kotlin + whisper.cpp vía JNI)
 - PC: graba desde el **micrófono** o desde el **audio del sistema** (lo que suena en
   Chrome, apps, videollamadas — nativo en Windows/Linux, requiere BlackHole en macOS),
   exporta `.txt` (con líneas ajustadas para leer sin scroll horizontal), `.md`, `.srt`,
-  `.vtt`; además descarga audio de YouTube.
-- Android: transcribe archivos del teléfono y permite copiar/compartir el texto.
+  `.vtt` y `.json` estructurado con tiempos; además descarga audio de YouTube.
+- Android: transcribe archivos del teléfono, conserva la revisión local y permite
+  copiar, compartir, guardar `.txt` o exportar `.srt` con tiempos.
 
 ## Créditos
 

@@ -8,6 +8,8 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.OpenableColumns
+import android.text.Editable
+import android.text.TextWatcher
 import android.view.View
 import android.view.WindowManager
 import android.widget.ArrayAdapter
@@ -23,6 +25,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.OutputStreamWriter
+import java.util.Locale
 
 class MainActivity : AppCompatActivity() {
 
@@ -34,6 +37,7 @@ class MainActivity : AppCompatActivity() {
     private val langCodes = listOf("es", "en", "pt", "fr", "")
 
     private var selectedUri: Uri? = null
+    private var actualizandoResultado = false
 
     private val pickAudio =
         registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -43,6 +47,11 @@ class MainActivity : AppCompatActivity() {
     private val guardarTxt =
         registerForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
             if (uri != null) guardarResultadoEn(uri)
+        }
+
+    private val guardarSrt =
+        registerForActivityResult(ActivityResultContracts.CreateDocument("application/x-subrip")) { uri ->
+            if (uri != null) guardarResultadoSrtEn(uri)
         }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -65,6 +74,16 @@ class MainActivity : AppCompatActivity() {
         b.ddModel.setText(savedModel, false)
         b.ddLanguage.setText(langLabels[savedLangPos], false)
 
+        b.txtResult.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
+            override fun afterTextChanged(s: Editable?) {
+                if (!actualizandoResultado) {
+                    viewModel.actualizarTextoEditado(applicationContext, s?.toString() ?: "")
+                }
+            }
+        })
+
         b.btnSelect.setOnClickListener {
             pickAudio.launch(arrayOf("audio/*", "video/*"))
         }
@@ -78,8 +97,16 @@ class MainActivity : AppCompatActivity() {
                 .putString("model", model)
                 .putInt("lang", langPos)
                 .apply()
+            actualizandoResultado = true
             b.txtResult.setText("")
-            viewModel.transcribe(applicationContext, uri, model, langCodes[langPos])
+            actualizandoResultado = false
+            viewModel.transcribe(
+                applicationContext,
+                uri,
+                model,
+                langCodes[langPos],
+                displayName(uri)
+            )
         }
 
         b.btnCancel.setOnClickListener {
@@ -97,6 +124,11 @@ class MainActivity : AppCompatActivity() {
             guardarTxt.launch("$base.txt")
         }
 
+        b.btnSaveTimed.setOnClickListener {
+            val base = selectedUri?.let { displayName(it).substringBeforeLast('.') } ?: "transcripcion"
+            guardarSrt.launch("$base.srt")
+        }
+
         b.btnShare.setOnClickListener {
             val send = Intent(Intent.ACTION_SEND).apply {
                 type = "text/plain"
@@ -112,6 +144,7 @@ class MainActivity : AppCompatActivity() {
                 viewModel.uiState.collect { estado -> render(estado) }
             }
         }
+        viewModel.restaurar(applicationContext)
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -136,13 +169,29 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun tomarUri(uri: Uri) {
+        if (viewModel.isWorking) {
+            Toast.makeText(
+                this,
+                "Espera a que termine o cancela la transcripción actual",
+                Toast.LENGTH_SHORT
+            ).show()
+            return
+        }
         try {
             contentResolver.takePersistableUriPermission(
                 uri, Intent.FLAG_GRANT_READ_URI_PERMISSION
             )
         } catch (_: Exception) { /* algunos proveedores (p.ej. de otra app) no lo permiten */ }
+        viewModel.prepararNuevaFuente()
         selectedUri = uri
         b.txtFile.text = displayName(uri)
+        actualizandoResultado = true
+        b.txtResult.setText("")
+        actualizandoResultado = false
+        b.btnCopy.isEnabled = false
+        b.btnSave.isEnabled = false
+        b.btnSaveTimed.isEnabled = false
+        b.btnShare.isEnabled = false
         b.btnTranscribe.isEnabled = !viewModel.isWorking
     }
 
@@ -151,8 +200,10 @@ class MainActivity : AppCompatActivity() {
         lifecycleScope.launch {
             val ok = withContext(Dispatchers.IO) {
                 try {
-                    contentResolver.openOutputStream(uri)?.use { out ->
-                        OutputStreamWriter(out, Charsets.UTF_8).use { it.write(texto) }
+                    val out = contentResolver.openOutputStream(uri)
+                        ?: return@withContext false
+                    out.use {
+                        OutputStreamWriter(it, Charsets.UTF_8).use { writer -> writer.write(texto) }
                     }
                     true
                 } catch (_: Exception) {
@@ -165,6 +216,40 @@ class MainActivity : AppCompatActivity() {
                 Toast.LENGTH_SHORT
             ).show()
         }
+    }
+
+    private fun guardarResultadoSrtEn(uri: Uri) {
+        val estado = viewModel.uiState.value as? TranscribeUiState.Done ?: return
+        val texto = estado.segments.mapIndexed { index, segmento ->
+            "${index + 1}\n${marcaSrt(segmento.startMs)} --> ${marcaSrt(segmento.endMs)}\n" +
+                segmento.text.trim() + "\n"
+        }.joinToString("\n")
+        lifecycleScope.launch {
+            val ok = withContext(Dispatchers.IO) {
+                try {
+                    val out = contentResolver.openOutputStream(uri)
+                        ?: return@withContext false
+                    out.use { OutputStreamWriter(it, Charsets.UTF_8).use { writer -> writer.write(texto) } }
+                    true
+                } catch (_: Exception) {
+                    false
+                }
+            }
+            Toast.makeText(
+                this@MainActivity,
+                if (ok) "Subtítulos guardados" else "No se pudo guardar el archivo",
+                Toast.LENGTH_SHORT
+            ).show()
+        }
+    }
+
+    private fun marcaSrt(milisegundos: Long): String {
+        val total = milisegundos.coerceAtLeast(0L)
+        val horas = total / 3_600_000
+        val minutos = (total % 3_600_000) / 60_000
+        val segundos = (total % 60_000) / 1_000
+        val ms = total % 1_000
+        return String.format(Locale.ROOT, "%02d:%02d:%02d,%03d", horas, minutos, segundos, ms)
     }
 
     /** Ajusta el texto a ~100 columnas, igual que la version de escritorio,
@@ -201,6 +286,7 @@ class MainActivity : AppCompatActivity() {
                 b.txtStatus.text = estado.message
                 b.btnCopy.isEnabled = false
                 b.btnSave.isEnabled = false
+                b.btnSaveTimed.isEnabled = false
                 b.btnShare.isEnabled = false
                 if (estado.progressPct != null) {
                     b.progress.isIndeterminate = false
@@ -211,11 +297,17 @@ class MainActivity : AppCompatActivity() {
             }
             is TranscribeUiState.Done -> {
                 setBusy(false)
-                b.txtResult.setText(estado.text)
-                b.btnCopy.isEnabled = estado.text.isNotEmpty()
-                b.btnSave.isEnabled = estado.text.isNotEmpty()
-                b.btnShare.isEnabled = estado.text.isNotEmpty()
-                b.txtStatus.text = if (estado.text.isEmpty()) "No se detectó voz." else "Listo."
+                val texto = estado.editedText ?: estado.text
+                if (b.txtResult.text.toString() != texto) {
+                    actualizandoResultado = true
+                    b.txtResult.setText(texto)
+                    actualizandoResultado = false
+                }
+                b.btnCopy.isEnabled = texto.isNotEmpty()
+                b.btnSave.isEnabled = texto.isNotEmpty()
+                b.btnSaveTimed.isEnabled = texto.isNotEmpty() && estado.segments.isNotEmpty()
+                b.btnShare.isEnabled = texto.isNotEmpty()
+                b.txtStatus.text = if (texto.isEmpty()) "No se detectó voz." else "Listo."
             }
             is TranscribeUiState.Cancelled -> {
                 setBusy(false)

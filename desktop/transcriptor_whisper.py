@@ -47,14 +47,45 @@ EXTS = (".mp3", ".wav", ".m4a", ".ogg", ".flac", ".mp4", ".aac",
         ".wma", ".opus", ".webm", ".mkv", ".avi")
 MESES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio",
          "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
-CONFIG_PATH = Path(__file__).parent / "transcriptor_config.json"
+def _carpeta_datos_aplicacion():
+    """Devuelve una carpeta persistente y escribible para los datos de VtT.
+
+    En modo fuente vive junto a este archivo. En un ejecutable PyInstaller
+    ``__file__`` puede apuntar a la carpeta temporal de extracción; en ese
+    caso se usa la carpeta del ejecutable y, si está protegida, una carpeta de
+    datos del usuario. Nunca se guardan datos en ``sys._MEIPASS``.
+    """
+    if getattr(sys, "frozen", False):
+        candidata = Path(sys.executable).resolve().parent
+    else:
+        candidata = Path(__file__).resolve().parent
+
+    try:
+        candidata.mkdir(parents=True, exist_ok=True)
+        prueba = candidata / ".vtt_escritura"
+        prueba.write_text("ok", encoding="utf-8")
+        prueba.unlink(missing_ok=True)
+        return candidata
+    except (OSError, PermissionError):
+        if os.name == "nt":
+            raiz = os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA")
+        else:
+            raiz = os.environ.get("XDG_DATA_HOME")
+        base_usuario = Path(raiz) if raiz else (Path.home() / ".local" / "share")
+        destino = base_usuario / "VtT"
+        destino.mkdir(parents=True, exist_ok=True)
+        return destino
+
+
+CARPETA_DATOS = _carpeta_datos_aplicacion()
+CONFIG_PATH = CARPETA_DATOS / "transcriptor_config.json"
 
 # Carpetas persistentes (NUNCA temporales): grabaciones y transcripciones sin carpeta
 # de salida configurada se guardan aqui, para que no se pierdan al cerrar la app.
-CARPETA_GRABACIONES = Path(__file__).parent / "grabaciones"
-CARPETA_TRANSCRIPCIONES = Path(__file__).parent / "transcripciones"
-CARPETA_GRABACIONES.mkdir(exist_ok=True)
-CARPETA_TRANSCRIPCIONES.mkdir(exist_ok=True)
+CARPETA_GRABACIONES = CARPETA_DATOS / "grabaciones"
+CARPETA_TRANSCRIPCIONES = CARPETA_DATOS / "transcripciones"
+CARPETA_GRABACIONES.mkdir(parents=True, exist_ok=True)
+CARPETA_TRANSCRIPCIONES.mkdir(parents=True, exist_ok=True)
 
 # Paleta moderna (violeta vibrante + superficies claras), minimalista.
 PALETA = {
@@ -343,6 +374,7 @@ class TranscriptorApp:
         self.v_md = tk.BooleanVar(value=False)
         self.v_srt = tk.BooleanVar(value=False)
         self.v_vtt = tk.BooleanVar(value=False)
+        self.v_json = tk.BooleanVar(value=False)
         ttk.Label(fr_o, text="Formatos:").grid(row=1, column=0, sticky="w", padx=4, pady=4)
         fr_fmt = ttk.Frame(fr_o)
         fr_fmt.grid(row=1, column=1, columnspan=3, sticky="w")
@@ -350,6 +382,7 @@ class TranscriptorApp:
         ttk.Checkbutton(fr_fmt, text=".md (Obsidian)", variable=self.v_md).pack(side="left", padx=6)
         ttk.Checkbutton(fr_fmt, text=".srt", variable=self.v_srt).pack(side="left", padx=6)
         ttk.Checkbutton(fr_fmt, text=".vtt", variable=self.v_vtt).pack(side="left", padx=6)
+        ttk.Checkbutton(fr_fmt, text=".json (tiempos)", variable=self.v_json).pack(side="left", padx=6)
 
         self.v_vad = tk.BooleanVar(value=True)
         self.v_words = tk.BooleanVar(value=False)
@@ -418,7 +451,7 @@ class TranscriptorApp:
         if isinstance(c.get("historial_salidas"), list):
             self.historial_salidas = [str(x) for x in c["historial_salidas"]][:10]
         for k, var in [("txt", self.v_txt), ("md", self.v_md), ("srt", self.v_srt),
-                       ("vtt", self.v_vtt), ("vad", self.v_vad), ("words", self.v_words),
+                       ("vtt", self.v_vtt), ("json", self.v_json), ("vad", self.v_vad), ("words", self.v_words),
                        ("auto_transcribir", self.v_auto_transcribir)]:
             if k in c:
                 var.set(bool(c[k]))
@@ -430,6 +463,7 @@ class TranscriptorApp:
             "salida": self.v_out.get().strip(),
             "txt": self.v_txt.get(), "md": self.v_md.get(),
             "srt": self.v_srt.get(), "vtt": self.v_vtt.get(),
+            "json": self.v_json.get(),
             "vad": self.v_vad.get(), "words": self.v_words.get(),
             "auto_transcribir": self.v_auto_transcribir.get(),
             "tema": "oscuro" if self.tema_oscuro else "claro",
@@ -789,13 +823,19 @@ class TranscriptorApp:
                 else sd.query_devices(kind="input")
             rate = int(info.get("default_samplerate") or 0) or 44100
             max_ch = int(info.get("max_input_channels") or 1) or 1
-            hostapi_nombre = sd.query_hostapis(info.get("hostapi"))["name"]
         except Exception:
             rate, max_ch = 44100, 1
+        try:
+            hostapi_nombre = sd.query_hostapis(info.get("hostapi"))["name"]
+        except Exception:
+            # La consulta descriptiva no debe descartar la frecuencia nativa.
+            hostapi_nombre = "desconocida"
         canales = min(2, max_ch)
 
         def callback(indata, frames, tinfo, status):
             try:
+                if status:
+                    self.cola.put(("grabacion_advertencia", str(status)))
                 pico = float(np.abs(indata).max()) / 32768.0
                 self.nivel_grab = pico
                 mono = indata if indata.ndim == 1 or indata.shape[1] == 1 \
@@ -885,35 +925,44 @@ class TranscriptorApp:
                     mono_i16 = np.clip(mono_f * 32767.0, -32768, 32767).astype(np.int16)
                     if self.cola_grab is not None:
                         self.cola_grab.put(mono_i16.tobytes())
-        except Exception:
-            pass
+        except Exception as exc:
+            # El hilo de captura no puede tocar Tk. Informa al hilo principal
+            # para que cierre la sesión y conserve el WAV parcial.
+            if self.grab_stop is None or not self.grab_stop.is_set():
+                self.cola.put(("grabacion_error",
+                               f"Se perdió la captura del audio del sistema: {exc}"))
 
     def _writer_grab(self):
         """Drena la cola de bloques PCM y los escribe al .wav (hilo aparte)."""
-        while True:
-            try:
-                bloque = self.cola_grab.get(timeout=0.2)
-            except queue.Empty:
-                if self.grab_stop is not None and self.grab_stop.is_set():
+        # Capturar las referencias locales evita que el cierre de la UI pueda
+        # reemplazar la cola o el archivo mientras este hilo todavía escribe.
+        cola = self.cola_grab
+        wf = self.wave_file
+        try:
+            while cola is not None:
+                bloque = cola.get()  # el centinela llega cuando los productores terminaron
+                if bloque is None:
                     break
-                continue
-            if bloque is None:
-                break
-            # Descarta el transitorio inicial (en bytes: 2 por muestra int16).
-            if self.grab_descarta > 0:
-                saltar = min(self.grab_descarta * 2, len(bloque))
-                bloque = bloque[saltar:]
-                self.grab_descarta -= saltar // 2
-                if not bloque:
-                    continue
-            wf = self.wave_file
+                # Descarta el transitorio inicial (en bytes: 2 por muestra int16).
+                if self.grab_descarta > 0:
+                    saltar = min(self.grab_descarta * 2, len(bloque))
+                    bloque = bloque[saltar:]
+                    self.grab_descarta -= saltar // 2
+                    if not bloque:
+                        continue
+                if wf is not None:
+                    wf.writeframes(bloque)
+        except Exception as exc:
+            self.cola.put(("grabacion_error",
+                           f"No se pudo escribir la grabación: {exc}"))
+        finally:
             if wf is not None:
                 try:
-                    wf.writeframes(bloque)
+                    wf.close()
                 except Exception:
                     pass
 
-    def _detener_grabacion(self):
+    def _detener_grabacion(self, error=None):
         self.grabando = False
         self._cerrar_grabador()
         self.btn_grab.config(text="●  Grabar")
@@ -922,11 +971,16 @@ class TranscriptorApp:
         if self.ruta_grab and os.path.exists(self.ruta_grab) and os.path.getsize(self.ruta_grab) > 44:
             self._insertar_archivo(self.ruta_grab)
             self._escribe(f"Grabación guardada y agregada: {Path(self.ruta_grab).name}")
-            self._set_estado("Grabación lista. Ya puedes transcribirla.", "ok")
-            if self.v_auto_transcribir.get() and not self.transcribiendo:
+            if error:
+                self._set_estado("Grabación incompleta. Revisa el registro.", "error")
+            else:
+                self._set_estado("Grabación lista. Ya puedes transcribirla.", "ok")
+            if not error and self.v_auto_transcribir.get() and not self.transcribiendo:
                 self._iniciar()
         else:
             self._escribe("Grabación vacía o no guardada.")
+            if error:
+                self._set_estado("No se pudo completar la grabación.", "error")
         self.ruta_grab = None
 
     def _cerrar_grabador(self):
@@ -952,17 +1006,18 @@ class TranscriptorApp:
             if self.cola_grab is not None:
                 self.cola_grab.put(None)
             if self.t_writer is not None:
-                self.t_writer.join(timeout=2.0)
+                self.t_writer.join(timeout=10.0)
         except Exception:
             pass
+        if self.t_writer is not None and self.t_writer.is_alive():
+            # No cerrar ni reemplazar el archivo debajo del escritor. La sesión
+            # queda viva hasta que el hilo termine, evitando pérdida de audio.
+            self._escribe("La grabación sigue finalizando; no se cerró el archivo a la fuerza.")
+            return
         self.t_writer = None
         self.grab_stop = None
         self.cola_grab = None
-        try:
-            if self.wave_file is not None:
-                self.wave_file.close()
-        except Exception:
-            pass
+        # _writer_grab es el único dueño del cierre del WAV.
         self.wave_file = None
 
     def _tick_grab(self):
@@ -981,7 +1036,8 @@ class TranscriptorApp:
         if not self.archivos:
             messagebox.showwarning("Sin archivos", "Agrega al menos un audio.")
             return
-        if not (self.v_txt.get() or self.v_md.get() or self.v_srt.get() or self.v_vtt.get()):
+        if not (self.v_txt.get() or self.v_md.get() or self.v_srt.get() or
+                self.v_vtt.get() or self.v_json.get()):
             messagebox.showwarning("Formato", "Marca al menos un formato de salida.")
             return
         salida = self.v_out.get().strip() or None
@@ -993,7 +1049,8 @@ class TranscriptorApp:
         idioma = IDIOMAS[self.cmb_i.get()]
         modelo = self.cmb_m.get()
         formatos = {"txt": self.v_txt.get(), "md": self.v_md.get(),
-                    "srt": self.v_srt.get(), "vtt": self.v_vtt.get()}
+                    "srt": self.v_srt.get(), "vtt": self.v_vtt.get(),
+                    "json": self.v_json.get()}
 
         self.transcribiendo = True
         self.cancelar.clear()
@@ -1030,41 +1087,63 @@ class TranscriptorApp:
                 self.cola.put(("status", f"Transcribiendo {i}/{total}: {nombre}"))
                 self.cola.put(("progress", 0))
                 t0 = time.time()
-
-                segments, info = self.modelo.transcribe(
-                    archivo, language=idioma, vad_filter=vad, word_timestamps=words)
-                dur = info.duration or 0
-                self.dur_actual = dur
-                self.t_transcripcion_inicio = t0
-
                 segs = []
                 partes = []
-                for seg in segments:
-                    if self.cancelar.is_set():
-                        raise Cancelado()
-                    segs.append(seg)
-                    partes.append(seg.text)
-                    if dur:
-                        self.cola.put(("progress", min(100.0, seg.end / dur * 100)))
-                    self.cola.put(("segmento", (seg.start, seg.end, seg.text)))
-                texto = "".join(partes).strip()
+                try:
+                    segments, info = self.modelo.transcribe(
+                        archivo, language=idioma, vad_filter=vad, word_timestamps=words)
+                    dur = info.duration or 0
+                    self.dur_actual = dur
+                    self.t_transcripcion_inicio = t0
 
-                if salida:
-                    base = Path(salida)
-                elif self._es_temporal(archivo):
-                    # Audio descargado (p.ej. de YouTube): su carpeta es temporal y se
-                    # borra al cerrar la app. Escribimos la transcripcion en un lugar
-                    # persistente para no perderla.
-                    base = CARPETA_TRANSCRIPCIONES
-                else:
-                    base = Path(archivo).parent
-                self.ultima_salida = str(base)
-                self.cola.put(("salida_nueva", str(base)))
-                escritos = self._escribir_salidas(base, archivo, modelo, idioma, texto, segs, formatos)
-                self.cola.put(("progress", 100))
-                for e in escritos:
-                    self.cola.put(("log", f"  -> {e}"))
-                self.cola.put(("log", f"OK {nombre} ({time.time() - t0:.0f}s)"))
+                    for seg in segments:
+                        if self.cancelar.is_set():
+                            raise Cancelado()
+                        segs.append(seg)
+                        partes.append(seg.text)
+                        if dur:
+                            self.cola.put(("progress", min(100.0, seg.end / dur * 100)))
+                        self.cola.put(("segmento", (seg.start, seg.end, seg.text)))
+                    texto = "".join(partes).strip()
+
+                    if salida:
+                        base = Path(salida)
+                    elif self._es_temporal(archivo):
+                        # Audio descargado (p.ej. de YouTube): su carpeta es temporal y se
+                        # borra al cerrar la app. Escribimos la transcripcion en un lugar
+                        # persistente para no perderla.
+                        base = CARPETA_TRANSCRIPCIONES
+                    else:
+                        base = Path(archivo).parent
+                    self.ultima_salida = str(base)
+                    self.cola.put(("salida_nueva", str(base)))
+                    escritos = self._escribir_salidas(base, archivo, modelo, idioma, texto, segs, formatos)
+                    self.cola.put(("progress", 100))
+                    for e in escritos:
+                        self.cola.put(("log", f"  -> {e}"))
+                    self.cola.put(("log", f"OK {nombre} ({time.time() - t0:.0f}s)"))
+                except Cancelado:
+                    # Conservar lo reconocido antes de cancelar evita perder
+                    # una sesión larga por detenerla al final de un segmento.
+                    if segs:
+                        try:
+                            base = Path(salida) if salida else (
+                                CARPETA_TRANSCRIPCIONES if self._es_temporal(archivo)
+                                else Path(archivo).parent
+                            )
+                            parcial = "".join(partes).strip()
+                            escritos = self._escribir_salidas(
+                                base, archivo, modelo, idioma, parcial, segs, formatos)
+                            self.cola.put(("log", f"PARCIAL {nombre}: " + ", ".join(escritos)))
+                        except Exception:
+                            self.cola.put(("log", f"No se pudo guardar el parcial de {nombre}:\n"
+                                           + traceback.format_exc()))
+                    raise
+                except Exception:
+                    # Un archivo defectuoso no debe impedir que el lote continúe.
+                    # El traceback queda asociado al nombre para poder reintentar solo ese archivo.
+                    self.cola.put(("log", f"ERROR {nombre}:\n{traceback.format_exc()}"))
+                    self.cola.put(("archivo_fallido", nombre))
 
             self.cola.put(("log", "=== Completado ==="))
         except Cancelado:
@@ -1075,25 +1154,48 @@ class TranscriptorApp:
             self.cola.put(("done", None))
 
     def _escribir_salidas(self, base, archivo, modelo, idioma, texto, segs, formatos):
-        tronco = base / Path(archivo).stem
+        base.mkdir(parents=True, exist_ok=True)
+        tronco = self._tronco_salida_disponible(base, archivo, formatos)
         escritos = []
         if formatos["txt"]:
-            p = tronco.with_suffix(".txt")
+            p = tronco.with_name(tronco.name + ".txt")
             p.write_text(envolver_texto(texto) + "\n", encoding="utf-8")
             escritos.append(p.name)
         if formatos["md"]:
-            p = tronco.with_suffix(".md")
+            p = tronco.with_name(tronco.name + ".md")
             p.write_text(self._fmt_md(archivo, modelo, idioma, texto, segs), encoding="utf-8")
             escritos.append(p.name)
         if formatos["srt"]:
-            p = tronco.with_suffix(".srt")
+            p = tronco.with_name(tronco.name + ".srt")
             p.write_text(self._fmt_srt(segs), encoding="utf-8")
             escritos.append(p.name)
         if formatos["vtt"]:
-            p = tronco.with_suffix(".vtt")
+            p = tronco.with_name(tronco.name + ".vtt")
             p.write_text(self._fmt_vtt(segs), encoding="utf-8")
             escritos.append(p.name)
+        if formatos.get("json"):
+            p = tronco.with_name(tronco.name + ".json")
+            p.write_text(self._fmt_json(archivo, modelo, idioma, texto, segs), encoding="utf-8")
+            escritos.append(p.name)
         return escritos
+
+    @staticmethod
+    def _tronco_salida_disponible(base, archivo, formatos):
+        """Elige un tronco único para una familia de exportaciones.
+
+        ``Path.with_suffix`` trataría el último punto de ``audiencia.01`` como
+        una extensión y produciría ``audiencia.txt``. Se conserva el nombre
+        completo y se agrega ``(2)``, ``(3)``… si el resultado ya existe.
+        """
+        stem = Path(archivo).stem
+        extensiones = [f".{ext}" for ext, activo in formatos.items() if activo]
+        candidato = base / stem
+        numero = 1
+        while any((candidato.with_name(candidato.name + ext)).exists()
+                  for ext in extensiones):
+            numero += 1
+            candidato = base / f"{stem} ({numero})"
+        return candidato
 
     def _fmt_md(self, archivo, modelo, idioma, texto, segs):
         lineas = [
@@ -1112,6 +1214,21 @@ class TranscriptorApp:
         ]
         for s in segs:
             lineas.append(f"- `[{ts_simple(s.start)} -> {ts_simple(s.end)}]` {s.text.strip()}")
+            palabras = getattr(s, "words", None) or []
+            if palabras:
+                detalles = []
+                for palabra in palabras:
+                    inicio = getattr(palabra, "start", None)
+                    fin = getattr(palabra, "end", None)
+                    texto_palabra = getattr(palabra, "word", "")
+                    if inicio is None or fin is None:
+                        detalles.append(str(texto_palabra).strip())
+                    else:
+                        detalles.append(
+                            f"[{ts_simple(inicio)} -> {ts_simple(fin)}] "
+                            f"{str(texto_palabra).strip()}"
+                        )
+                lineas.append("  - **Palabras:** " + " · ".join(detalles))
         return "\n".join(lineas) + "\n"
 
     def _fmt_srt(self, segs):
@@ -1130,6 +1247,38 @@ class TranscriptorApp:
             out.append(s.text.strip())
             out.append("")
         return "\n".join(out)
+
+    def _fmt_json(self, archivo, modelo, idioma, texto, segs):
+        """Formato maestro para revisión, palabras y futura diarización."""
+        def palabra_dict(palabra):
+            return {
+                "start": getattr(palabra, "start", None),
+                "end": getattr(palabra, "end", None),
+                "word": getattr(palabra, "word", ""),
+                "probability": getattr(palabra, "probability", None),
+            }
+
+        segmentos = []
+        for s in segs:
+            segmentos.append({
+                "start": s.start,
+                "end": s.end,
+                "text": s.text,
+                "words": [palabra_dict(p) for p in (getattr(s, "words", None) or [])],
+                "speaker": None,
+            })
+        documento = {
+            "schema_version": 1,
+            "source": Path(archivo).name,
+            "model": modelo,
+            "language": idioma or "auto",
+            "created_at": datetime.now().isoformat(timespec="seconds"),
+            "text": texto,
+            "segments": segmentos,
+            "speakers": [],
+            "review": {"status": "machine_generated", "edited": False},
+        }
+        return json.dumps(documento, ensure_ascii=False, indent=2) + "\n"
 
     def _cancelar(self):
         if self.transcribiendo:
@@ -1160,6 +1309,14 @@ class TranscriptorApp:
                 elif tipo == "cancelado":
                     self._escribe("=== Cancelado por el usuario ===")
                     self._set_estado("Cancelado.", "cancelado")
+                elif tipo == "grabacion_error":
+                    self._escribe("ERROR de grabación: " + str(p[0]))
+                    if self.grabando:
+                        self._detener_grabacion(error=str(p[0]))
+                elif tipo == "grabacion_advertencia":
+                    self._escribe("Aviso de audio: " + str(p[0]))
+                elif tipo == "archivo_fallido":
+                    self._escribe(f"Archivo omitido; el lote continúa: {p[0]}")
                 elif tipo == "done":
                     self._finalizar()
                 elif tipo == "dep_instalada":

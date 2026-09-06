@@ -28,8 +28,16 @@ No necesitas instalar nada de desarrollo. El APK lo construye GitHub Actions:
    **Cancelar** en cualquier momento.
    - La **primera vez con cada modelo** se descarga el modelo (necesita internet).
    - Después transcribe **offline**.
-5. **Copia**, **guarda como .txt** o **comparte** el texto resultante. El `.txt`
-   se guarda ajustado a ~100 caracteres por línea, igual que en la versión de PC.
+5. **Copia**, **guarda como .txt**, **guarda como .srt con tiempos** o **comparte**
+   el texto resultante. El `.txt` se guarda ajustado a ~100 caracteres por línea,
+   igual que en la versión de PC. El `.srt` usa los segmentos temporales devueltos
+   por whisper.cpp.
+
+El último documento se conserva en el almacenamiento interno de la aplicación, junto
+con el texto original y tus correcciones. Si Android termina el proceso, se recupera
+al volver a abrir la app. Las correcciones se mantienen separadas del reconocimiento
+original. El respaldo automático de Android está desactivado para evitar que el
+contenido de trabajo termine en un respaldo no elegido.
 
 > Sugerencia: en el teléfono, empieza con el modelo `tiny` o `base`. `small` es más
 > preciso pero más lento y pesado; conviene en equipos con buena RAM.

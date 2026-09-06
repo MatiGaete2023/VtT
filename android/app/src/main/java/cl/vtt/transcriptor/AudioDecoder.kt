@@ -48,27 +48,33 @@ object AudioDecoder {
         val pfd = context.contentResolver.openFileDescriptor(uri, "r")
             ?: throw IllegalArgumentException("No se pudo abrir el archivo de audio")
 
-        pfd.use {
-            extractor.setDataSource(it.fileDescriptor)
-            val trackIndex = selectAudioTrack(extractor)
-            require(trackIndex >= 0) { "El archivo no contiene una pista de audio" }
-            extractor.selectTrack(trackIndex)
+        return try {
+            pfd.use {
+                extractor.setDataSource(it.fileDescriptor)
+                val trackIndex = selectAudioTrack(extractor)
+                require(trackIndex >= 0) { "El archivo no contiene una pista de audio" }
+                extractor.selectTrack(trackIndex)
 
-            val format = extractor.getTrackFormat(trackIndex)
-            val mime = format.getString(MediaFormat.KEY_MIME)
-                ?: throw IllegalArgumentException("Formato de audio desconocido")
-            val srcRate = format.getInteger(MediaFormat.KEY_SAMPLE_RATE)
-            val srcChannels = format.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
+                val format = extractor.getTrackFormat(trackIndex)
+                val mime = format.getString(MediaFormat.KEY_MIME)
+                    ?: throw IllegalArgumentException("Formato de audio desconocido")
+                val srcRate = format.getInteger(MediaFormat.KEY_SAMPLE_RATE)
+                val srcChannels = format.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
 
-            val pcm = decodePcm16(extractor, format, mime, srcRate, srcChannels)
-            extractor.release()
+                val pcm = decodePcm16(extractor, format, mime, srcRate, srcChannels)
+                val shorts = ShortArray(pcm.bytes.size / 2)
+                ByteBuffer.wrap(pcm.bytes).order(ByteOrder.LITTLE_ENDIAN)
+                    .asShortBuffer().get(shorts)
 
-            val shorts = ShortArray(pcm.bytes.size / 2)
-            ByteBuffer.wrap(pcm.bytes).order(ByteOrder.LITTLE_ENDIAN)
-                .asShortBuffer().get(shorts)
-
-            val mono = downmixToMono(shorts, pcm.channels)
-            return resample(mono, pcm.sampleRate, TARGET_RATE)
+                val mono = downmixToMono(shorts, pcm.channels)
+                resample(mono, pcm.sampleRate, TARGET_RATE)
+            }
+        } finally {
+            try {
+                extractor.release()
+            } catch (_: Exception) {
+                // El extractor puede haberse liberado por el proveedor.
+            }
         }
     }
 
@@ -88,18 +94,19 @@ object AudioDecoder {
         fallbackChannels: Int
     ): Pcm {
         val codec = MediaCodec.createDecoderByType(mime)
-        codec.configure(inputFormat, null, null, 0)
-        codec.start()
+        try {
+            codec.configure(inputFormat, null, null, 0)
+            codec.start()
 
-        val bos = ByteArrayOutputStream()
-        val info = MediaCodec.BufferInfo()
-        val timeoutUs = 10_000L
-        var sawInputEOS = false
-        var sawOutputEOS = false
-        var outRate = fallbackRate
-        var outChannels = fallbackChannels
+            val bos = ByteArrayOutputStream()
+            val info = MediaCodec.BufferInfo()
+            val timeoutUs = 10_000L
+            var sawInputEOS = false
+            var sawOutputEOS = false
+            var outRate = fallbackRate
+            var outChannels = fallbackChannels
 
-        while (!sawOutputEOS) {
+            while (!sawOutputEOS) {
             if (!sawInputEOS) {
                 val inIndex = codec.dequeueInputBuffer(timeoutUs)
                 if (inIndex >= 0) {
@@ -145,11 +152,20 @@ object AudioDecoder {
                     }
                 }
             }
+            }
+            return Pcm(bos.toByteArray(), outRate, outChannels)
+        } finally {
+            try {
+                codec.stop()
+            } catch (_: Exception) {
+                // Puede fallar si configure/start no llegó a completarse.
+            }
+            try {
+                codec.release()
+            } catch (_: Exception) {
+                // Liberación idempotente para proveedores defectuosos.
+            }
         }
-
-        codec.stop()
-        codec.release()
-        return Pcm(bos.toByteArray(), outRate, outChannels)
     }
 
     private fun downmixToMono(pcm: ShortArray, channels: Int): FloatArray {

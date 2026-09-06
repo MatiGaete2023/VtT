@@ -6,6 +6,7 @@
     <string name="transcribe">Transcribir</string>
     <string name="copy">Copiar</string>
     <string name="save">Guardar .txt</string>
+    <string name="save_timed">Guardar .srt con tiempos</string>
     <string name="share">Compartir</string>
     <string name="cancel">Cancelar</string>
     <string name="model">Modelo</string>
