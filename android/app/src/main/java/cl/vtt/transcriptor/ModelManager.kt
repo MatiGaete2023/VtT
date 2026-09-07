@@ -5,20 +5,17 @@ import java.io.File
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
+import java.security.MessageDigest
 
 /**
  * Gestiona la descarga (una sola vez) y el almacenamiento de los modelos GGML
  * de whisper.cpp. Una vez descargado, el modelo queda en el equipo y se usa
  * sin conexion.
  *
- * Verificacion de integridad: en vez de hardcodear el tamano exacto de cada
- * modelo (Hugging Face podria republicar el archivo con otro tamano, y no fue
- * posible verificar bytes exactos contra la fuente al escribir esto), se
- * guarda el tamano que el propio servidor reporto al terminar cada descarga
- * en un sidecar ".size" junto al modelo. isDownloaded() compara el tamano
- * real del archivo contra ese valor: si difieren (descarga interrumpida a
- * medias sin dejar el .part, corrupcion en disco, etc.), se considera invalido
- * y se vuelve a descargar.
+ * Verificacion de integridad local: se guardan el tamano y SHA-256 del archivo
+ * terminado en sidecars junto al modelo. Esto detecta truncamiento o corrupcion
+ * posterior en el almacenamiento. No sustituye un hash esperado publicado por
+ * una fuente confiable para autenticar la primera descarga.
  */
 object ModelManager {
 
@@ -38,6 +35,9 @@ object ModelManager {
     private fun sizeFile(context: Context, model: String): File =
         File(modelFile(context, model).parentFile, "ggml-$model.bin.size")
 
+    private fun hashFile(context: Context, model: String): File =
+        File(modelFile(context, model).parentFile, "ggml-$model.bin.sha256")
+
     private fun partFile(context: Context, model: String): File =
         File(modelFile(context, model).parentFile, "ggml-$model.bin.part")
 
@@ -46,15 +46,19 @@ object ModelManager {
         if (!f.exists()) return false
         val sf = sizeFile(context, model)
         val esperado = sf.takeIf { it.exists() }?.readText()?.trim()?.toLongOrNull()
-        if (esperado != null) {
-            return f.length() == esperado
-        }
-        // Sin sidecar (modelo bajado con una version anterior de la app):
-        // acepta el heuristico viejo, pero deja el sidecar escrito para que
-        // desde ahora se verifique de verdad.
-        val ok = f.length() > 1_000_000L
-        if (ok) sf.writeText(f.length().toString())
-        return ok
+        if (esperado != null && f.length() != esperado) return false
+        if (esperado == null && f.length() <= 1_000_000L) return false
+
+        val hf = hashFile(context, model)
+        val hashEsperado = hf.takeIf { it.exists() }?.readText()?.trim()?.lowercase()
+        val hashActual = try { sha256(f) } catch (_: Exception) { return false }
+        if (hashEsperado != null && hashEsperado != hashActual) return false
+
+        // Migra modelos antiguos: desde ahora quedan protegidos también
+        // contra corrupción silenciosa posterior a la descarga.
+        if (esperado == null) sf.writeText(f.length().toString())
+        if (hashEsperado == null) hf.writeText(hashActual)
+        return true
     }
 
     /**
@@ -80,6 +84,7 @@ object ModelManager {
         var existentes = if (tmp.exists()) tmp.length() else 0L
 
         var conn = abrirConexion(url, existentes)
+        var totalEsperado = -1L
         try {
             conn.connect()
             var reanudando = existentes > 0L
@@ -97,8 +102,31 @@ object ModelManager {
                 throw IOException("HTTP ${conn.responseCode} al descargar el modelo")
             }
 
+            if (reanudando) {
+                val inicio = inicioContentRange(conn.getHeaderField("Content-Range"))
+                if (inicio != existentes) {
+                    // Nunca anexar bytes si el servidor respondió un rango
+                    // distinto del solicitado: se reinicia de forma segura.
+                    conn.disconnect()
+                    tmp.delete()
+                    existentes = 0L
+                    reanudando = false
+                    conn = abrirConexion(url, 0L)
+                    conn.connect()
+                    if (conn.responseCode !in 200..299) {
+                        throw IOException("HTTP ${conn.responseCode} al reiniciar la descarga")
+                    }
+                }
+            }
+
             val restante = conn.contentLengthLong
-            val total = if (restante > 0) existentes + restante else -1L
+            totalEsperado = if (conn.responseCode == HttpURLConnection.HTTP_PARTIAL) {
+                totalContentRange(conn.getHeaderField("Content-Range"))
+            } else if (restante > 0) {
+                restante
+            } else {
+                -1L
+            }
 
             conn.inputStream.use { input ->
                 java.io.FileOutputStream(tmp, reanudando).use { output ->
@@ -113,8 +141,8 @@ object ModelManager {
                         if (leido < 0) break
                         output.write(buf, 0, leido)
                         descargado += leido
-                        if (total > 0) {
-                            val pct = ((descargado * 100) / total).toInt()
+                        if (totalEsperado > 0) {
+                            val pct = ((descargado * 100) / totalEsperado).toInt()
                             if (pct != lastPct) {
                                 lastPct = pct
                                 onProgress(pct)
@@ -128,12 +156,40 @@ object ModelManager {
         }
 
         val tamanoFinal = tmp.length()
+        if (totalEsperado > 0 && tamanoFinal != totalEsperado) {
+            throw IOException(
+                "Descarga incompleta: se recibieron $tamanoFinal de $totalEsperado bytes"
+            )
+        }
+        val hashFinal = sha256(tmp)
         if (!tmp.renameTo(target)) {
             tmp.copyTo(target, overwrite = true)
             tmp.delete()
         }
         sizeFile(context, model).writeText(tamanoFinal.toString())
+        hashFile(context, model).writeText(hashFinal)
         return target
+    }
+
+    private fun inicioContentRange(value: String?): Long? =
+        value?.substringAfter("bytes ", "")
+            ?.substringBefore('-')
+            ?.toLongOrNull()
+
+    private fun totalContentRange(value: String?): Long =
+        value?.substringAfter('/', "")?.toLongOrNull() ?: -1L
+
+    private fun sha256(file: File): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        file.inputStream().use { input ->
+            val buffer = ByteArray(64 * 1024)
+            while (true) {
+                val read = input.read(buffer)
+                if (read < 0) break
+                digest.update(buffer, 0, read)
+            }
+        }
+        return digest.digest().joinToString("") { "%02x".format(it.toInt() and 0xff) }
     }
 
     private fun abrirConexion(url: URL, reanudarDesde: Long): HttpURLConnection {
