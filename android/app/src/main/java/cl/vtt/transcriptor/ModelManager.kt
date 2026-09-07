@@ -19,6 +19,8 @@ import java.security.MessageDigest
  */
 object ModelManager {
 
+    private val hashesVerificados = mutableMapOf<String, Pair<Long, Long>>()
+
     // Modelos multilingue oficiales de whisper.cpp publicados en Hugging Face.
     private const val BASE_URL =
         "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/"
@@ -51,13 +53,25 @@ object ModelManager {
 
         val hf = hashFile(context, model)
         val hashEsperado = hf.takeIf { it.exists() }?.readText()?.trim()?.lowercase()
+        val firma = f.length() to f.lastModified()
+        if (hashEsperado != null) {
+            val ruta = f.absolutePath
+            synchronized(hashesVerificados) {
+                if (hashesVerificados[ruta] == firma) return true
+            }
+            val hashActual = try { sha256(f) } catch (_: Exception) { return false }
+            if (hashEsperado != hashActual) return false
+            synchronized(hashesVerificados) { hashesVerificados[ruta] = firma }
+            return true
+        }
+
         val hashActual = try { sha256(f) } catch (_: Exception) { return false }
-        if (hashEsperado != null && hashEsperado != hashActual) return false
 
         // Migra modelos antiguos: desde ahora quedan protegidos también
         // contra corrupción silenciosa posterior a la descarga.
         if (esperado == null) sf.writeText(f.length().toString())
-        if (hashEsperado == null) hf.writeText(hashActual)
+        hf.writeText(hashActual)
+        synchronized(hashesVerificados) { hashesVerificados[f.absolutePath] = firma }
         return true
     }
 
@@ -168,6 +182,9 @@ object ModelManager {
         }
         sizeFile(context, model).writeText(tamanoFinal.toString())
         hashFile(context, model).writeText(hashFinal)
+        synchronized(hashesVerificados) {
+            hashesVerificados[target.absolutePath] = target.length() to target.lastModified()
+        }
         return target
     }
 
