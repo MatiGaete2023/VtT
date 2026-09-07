@@ -279,6 +279,69 @@ class TranscriptorApp:
         self._aplicar_config()
         self.root.protocol("WM_DELETE_WINDOW", self._cerrar)
         self.root.after(120, self._procesar_cola)
+        self.root.after(350, self._verificar_dependencias_inicio)
+
+    def _verificar_dependencias_inicio(self):
+        """Informa una instalación incompleta antes de que el usuario inicie
+        una operación. Ejecutar directamente este archivo no instala el
+        entorno virtual de `run.py`, por lo que el aviso debe ser explícito.
+        """
+        import importlib.util
+
+        faltantes = []
+        for modulo, paquete, funcion in (
+                ("faster_whisper", "faster-whisper", "transcripción"),
+                ("yt_dlp", "yt-dlp", "descargas de YouTube")):
+            try:
+                disponible = importlib.util.find_spec(modulo) is not None
+            except (ImportError, ModuleNotFoundError, ValueError):
+                disponible = False
+            if not disponible:
+                faltantes.append((modulo, paquete, funcion))
+        if not faltantes:
+            return
+
+        self._set_estado("Instalación incompleta: faltan componentes.", "error")
+        nombres = ", ".join(paquete for _, paquete, _ in faltantes)
+        self._escribe(f"Faltan dependencias: {nombres}.")
+        self.root.after(200, lambda: self._mostrar_dependencias_faltantes(faltantes))
+
+    def _mostrar_dependencias_faltantes(self, faltantes):
+        nombres = ", ".join(paquete for _, paquete, _ in faltantes)
+        carpeta = Path(__file__).resolve().parent
+        if os.name == "nt":
+            instruccion = f'Abre "{carpeta / "run.bat"}" o ejecuta en esa carpeta:\n\npy run.py'
+        else:
+            instruccion = f"Ejecuta en esa carpeta:\n\npython3 run.py"
+        messagebox.showwarning(
+            "Instalación incompleta",
+            f"Faltan componentes para usar VtT: {nombres}.\n\n"
+            "La interfaz puede abrirse, pero no podrá descargar ni transcribir "
+            "hasta instalarlos.\n\n" + instruccion +
+            "\n\nTambién puedes instalar manualmente:\n"
+            "python -m pip install -r requirements.txt")
+
+    def _mostrar_error_dependencia(self, modulo, contexto):
+        paquetes = {
+            "faster_whisper": "faster-whisper",
+            "yt_dlp": "yt-dlp",
+            "sounddevice": "sounddevice",
+            "soundcard": "soundcard",
+        }
+        paquete = paquetes.get(modulo, modulo or "un componente requerido")
+        carpeta = Path(__file__).resolve().parent
+        if os.name == "nt":
+            instruccion = f'Abre "{carpeta / "run.bat"}" o ejecuta: py run.py'
+        else:
+            instruccion = "Ejecuta: python3 run.py"
+        mensaje = (
+            f"No se puede iniciar {contexto}: falta '{paquete}'.\n\n"
+            f"Usa el lanzador de VtT para instalarlo automáticamente:\n{instruccion}\n\n"
+            "Alternativa manual:\npython -m pip install -r requirements.txt"
+        )
+        self._escribe(mensaje)
+        self._set_estado("Falta instalar componentes. Revisa el registro.", "error")
+        messagebox.showerror("Componente faltante", mensaje)
 
     def _ui(self):
         pad = {"padx": 8, "pady": 4}
@@ -602,6 +665,8 @@ class TranscriptorApp:
                 if hijos:
                     ruta = str(hijos[0])
             self.cola.put(("yt_ok", ruta))
+        except ModuleNotFoundError as e:
+            self.cola.put(("dep_error", (e.name or "yt_dlp", "la descarga de YouTube")))
         except Exception:
             self.cola.put(("yt_err", traceback.format_exc()))
 
@@ -1072,7 +1137,11 @@ class TranscriptorApp:
     def _worker(self, archivos, modelo, idioma, salida, formatos, vad, words):
         try:
             self.cola.put(("log", "Importando faster-whisper (la primera vez puede tardar)..."))
-            from faster_whisper import WhisperModel
+            try:
+                from faster_whisper import WhisperModel
+            except ModuleNotFoundError as e:
+                self.cola.put(("dep_error", (e.name or "faster_whisper", "la transcripción")))
+                return
 
             if self.modelo is None or self.modelo_nombre != modelo:
                 self.cola.put(("log", f"Cargando modelo '{modelo}' (descarga solo la primera vez)..."))
@@ -1322,6 +1391,9 @@ class TranscriptorApp:
                 elif tipo == "dep_instalada":
                     modulo, nombre_visible, ok, on_listo = p[0]
                     self._dep_instalada(modulo, nombre_visible, ok, on_listo)
+                elif tipo == "dep_error":
+                    modulo, contexto = p[0]
+                    self._mostrar_error_dependencia(modulo, contexto)
                 elif tipo == "yt_progress":
                     self.pb_yt["value"] = p[0]
                 elif tipo == "yt_ok":

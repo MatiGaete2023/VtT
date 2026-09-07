@@ -147,6 +147,7 @@ desde la pestaña **Actions** del repositorio y descarga el artefacto de tu sist
 
 | Síntoma | Solución |
 |---|---|
+| `ModuleNotFoundError: No module named 'yt_dlp'` o `faster_whisper` | No abras `transcriptor_whisper.py` directamente. Cierra la ventana y ejecuta `run.bat` (Windows) o `python run.py`; el lanzador crea `.venv` e instala las dependencias correctas. |
 | "Python no se reconoce" (Windows) | Reinstala Python marcando **Add Python to PATH**. |
 | Error al crear `.venv` (Linux) | `sudo apt install python3-venv python3-tk` |
 | No abre la ventana (Linux) | Falta Tkinter: `sudo apt install python3-tk` |
