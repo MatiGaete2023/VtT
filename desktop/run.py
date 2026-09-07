@@ -102,12 +102,17 @@ def main():
         instalar_deps(py)
 
     # Lanza la interfaz grafica con el Python del entorno virtual.
+    # En Windows os.execv puede construir mal la línea de comandos cuando la
+    # ruta contiene espacios o paréntesis (p. ej. una carpeta de Descargas
+    # terminada en "(4)"). subprocess recibe los argumentos por separado y
+    # conserva esas rutas sin reinterpretarlas.
     print("Abriendo el Transcriptor Whisper...")
     try:
-        os.execv(str(py), [str(py), str(APP)])
-    except OSError:
-        # Respaldo si execv no esta disponible (algunos entornos Windows).
         raise SystemExit(subprocess.call([str(py), str(APP)]))
+    except OSError:
+        print("\nNo se pudo abrir la aplicación con el entorno instalado.")
+        print(f"Intenta ejecutar manualmente:\n    {py} {APP}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
