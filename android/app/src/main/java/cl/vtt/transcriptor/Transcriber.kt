@@ -62,7 +62,7 @@ class Transcriber {
         val threads = Runtime.getRuntime().availableProcessors().coerceIn(2, 8)
         val listener = onProgress?.let { cb -> WhisperBridge.ProgressListener { pct -> cb(pct) } }
         val raw = bridge.nativeTranscribe(ctxPtr, audio, lang, threads, listener).trim()
-        when {
+        return when {
             raw == "__VTT_CANCELLED__" ->
                 throw java.util.concurrent.CancellationException("cancelada")
             raw.startsWith("__VTT_ERROR__:") ->
