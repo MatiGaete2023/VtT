@@ -5,6 +5,14 @@ import org.json.JSONObject
 data class TranscriptionSegment(
     val startMs: Long,
     val endMs: Long,
+    val text: String,
+    /** Tiempos estimados por el motor; lista vacía si no estuvieron disponibles. */
+    val words: List<TranscriptionWord> = emptyList()
+)
+
+data class TranscriptionWord(
+    val startMs: Long?,
+    val endMs: Long?,
     val text: String
 )
 
@@ -76,11 +84,25 @@ class Transcriber {
                     if (segmentosJson != null) {
                         for (i in 0 until segmentosJson.length()) {
                             val item = segmentosJson.optJSONObject(i) ?: continue
+                            val palabrasJson = item.optJSONArray("words")
+                            val palabras = buildList {
+                                if (palabrasJson != null) {
+                                    for (j in 0 until palabrasJson.length()) {
+                                        val palabra = palabrasJson.optJSONObject(j) ?: continue
+                                        add(TranscriptionWord(
+                                            if (palabra.isNull("startMs")) null else palabra.optLong("startMs"),
+                                            if (palabra.isNull("endMs")) null else palabra.optLong("endMs"),
+                                            palabra.optString("text")
+                                        ))
+                                    }
+                                }
+                            }
                             add(
                                 TranscriptionSegment(
                                     item.optLong("startMs"),
                                     item.optLong("endMs"),
-                                    item.optString("text")
+                                    item.optString("text"),
+                                    palabras
                                 )
                             )
                         }
@@ -95,6 +117,11 @@ class Transcriber {
     fun requestAbort() {
         val ptr = ctxPtr
         if (ptr != 0L) bridge.nativeRequestAbort(ptr)
+    }
+
+    fun resetAbort() {
+        val ptr = ctxPtr
+        if (ptr != 0L) bridge.nativeResetAbort(ptr)
     }
 
     @Synchronized

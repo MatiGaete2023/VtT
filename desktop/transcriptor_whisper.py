@@ -829,7 +829,9 @@ class TranscriptorApp:
             carpeta = base
         else:
             carpeta = str(CARPETA_GRABACIONES)
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        # Los segundos no bastan si el usuario inicia/detiene dos pruebas muy
+        # seguidas: wave.open(..., "wb") reemplazaría el WAV anterior.
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         self.ruta_grab = os.path.join(carpeta, f"grabacion_{ts}.wav")
 
         self.cola_grab = queue.Queue()
@@ -1029,7 +1031,13 @@ class TranscriptorApp:
 
     def _detener_grabacion(self, error=None):
         self.grabando = False
-        self._cerrar_grabador()
+        if not self._cerrar_grabador():
+            # El escritor es dueño del WAV. No lo anunciamos ni permitimos
+            # transcribirlo hasta que confirme haberlo cerrado; tampoco se
+            # bloquea el hilo de Tk esperando I/O lento.
+            self._set_estado("Finalizando la grabación…", "neutro")
+            self.root.after(200, lambda: self._detener_grabacion(error))
+            return
         self.btn_grab.config(text="●  Grabar")
         self.lbl_grab_t.config(text="00:00")
         self.pb_nivel["value"] = 0
@@ -1078,12 +1086,13 @@ class TranscriptorApp:
             # No cerrar ni reemplazar el archivo debajo del escritor. La sesión
             # queda viva hasta que el hilo termine, evitando pérdida de audio.
             self._escribe("La grabación sigue finalizando; no se cerró el archivo a la fuerza.")
-            return
+            return False
         self.t_writer = None
         self.grab_stop = None
         self.cola_grab = None
         # _writer_grab es el único dueño del cierre del WAV.
         self.wave_file = None
+        return True
 
     def _tick_grab(self):
         if not self.grabando:
@@ -1149,6 +1158,8 @@ class TranscriptorApp:
                 self.modelo_nombre = modelo
 
             total = len(archivos)
+            correctos = 0
+            fallidos = 0
             for i, archivo in enumerate(archivos, 1):
                 if self.cancelar.is_set():
                     raise Cancelado()
@@ -1191,6 +1202,7 @@ class TranscriptorApp:
                     for e in escritos:
                         self.cola.put(("log", f"  -> {e}"))
                     self.cola.put(("log", f"OK {nombre} ({time.time() - t0:.0f}s)"))
+                    correctos += 1
                 except Cancelado:
                     # Conservar lo reconocido antes de cancelar evita perder
                     # una sesión larga por detenerla al final de un segmento.
@@ -1213,8 +1225,14 @@ class TranscriptorApp:
                     # El traceback queda asociado al nombre para poder reintentar solo ese archivo.
                     self.cola.put(("log", f"ERROR {nombre}:\n{traceback.format_exc()}"))
                     self.cola.put(("archivo_fallido", nombre))
+                    fallidos += 1
 
-            self.cola.put(("log", "=== Completado ==="))
+            if correctos == 0 and fallidos:
+                self.cola.put(("lote_error", "No se pudo transcribir ningún archivo."))
+            elif fallidos:
+                self.cola.put(("lote_parcial", (correctos, fallidos)))
+            else:
+                self.cola.put(("log", f"=== Completado: {correctos} archivo(s) ==="))
         except Cancelado:
             self.cola.put(("cancelado", None))
         except Exception:
@@ -1393,7 +1411,20 @@ class TranscriptorApp:
                     self._dep_instalada(modulo, nombre_visible, ok, on_listo)
                 elif tipo == "dep_error":
                     modulo, contexto = p[0]
+                    if contexto == "la descarga de YouTube":
+                        # dep_error es igualmente un estado terminal de la
+                        # descarga. Sin este cierre el botón quedaba bloqueado.
+                        self.bajando_yt = False
+                        self.btn_yt.config(state="normal")
+                        self.pb_yt.pack_forget()
                     self._mostrar_error_dependencia(modulo, contexto)
+                elif tipo == "lote_error":
+                    self._escribe("ERROR del lote: " + p[0])
+                    self._set_estado(p[0], "error")
+                elif tipo == "lote_parcial":
+                    correctos, fallidos = p[0]
+                    self._escribe(f"=== Completado con errores: {correctos} correcto(s), {fallidos} fallido(s) ===")
+                    self._set_estado(f"Completado parcialmente: {correctos} correcto(s), {fallidos} fallido(s).", "error")
                 elif tipo == "yt_progress":
                     self.pb_yt["value"] = p[0]
                 elif tipo == "yt_ok":

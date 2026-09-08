@@ -143,12 +143,24 @@ jobs:
       - name: Build signed release APK
         if: steps.check.outputs.tiene_keystore == 'true'
         working-directory: android
-        run: gradle assembleRelease --no-daemon --stacktrace
+        run: |
+          gradle assembleRelease --no-daemon --stacktrace \
+            -PVTT_VERSION_CODE=${{ github.run_number }} \
+            -PVTT_VERSION_NAME=1.0.${{ github.run_number }}
+
+      - name: Verificar firma y crear suma de integridad
+        if: steps.check.outputs.tiene_keystore == 'true'
+        run: |
+          APK=android/app/build/outputs/apk/release/app-release.apk
+          "$ANDROID_HOME/build-tools/34.0.0/apksigner" verify --verbose --print-certs "$APK"
+          sha256sum "$APK" > android/app/build/outputs/apk/release/app-release.apk.sha256
 
       - name: Upload signed APK artifact
         if: steps.check.outputs.tiene_keystore == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: TranscriptorVtT-release-apk
-          path: android/app/build/outputs/apk/release/app-release.apk
+          path: |
+            android/app/build/outputs/apk/release/app-release.apk
+            android/app/build/outputs/apk/release/app-release.apk.sha256
           if-no-files-found: error

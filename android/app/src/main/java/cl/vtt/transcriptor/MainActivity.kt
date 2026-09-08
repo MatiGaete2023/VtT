@@ -38,6 +38,8 @@ class MainActivity : AppCompatActivity() {
 
     private var selectedUri: Uri? = null
     private var actualizandoResultado = false
+    private var textoPendienteExportar: String? = null
+    private var srtPendienteExportar: String? = null
 
     private val pickAudio =
         registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -120,12 +122,19 @@ class MainActivity : AppCompatActivity() {
         }
 
         b.btnSave.setOnClickListener {
-            val base = selectedUri?.let { displayName(it).substringBeforeLast('.') } ?: "transcripcion"
+            textoPendienteExportar = b.txtResult.text.toString()
+            val base = nombreBaseActual()
             guardarTxt.launch("$base.txt")
         }
 
         b.btnSaveTimed.setOnClickListener {
-            val base = selectedUri?.let { displayName(it).substringBeforeLast('.') } ?: "transcripcion"
+            val estado = viewModel.uiState.value as? TranscribeUiState.Done ?: return@setOnClickListener
+            if (estado.editedText != null) {
+                Toast.makeText(this, "El SRT conserva el texto original por segmento. Revisa o deshaz la edición antes de exportarlo.", Toast.LENGTH_LONG).show()
+                return@setOnClickListener
+            }
+            srtPendienteExportar = construirSrt(estado)
+            val base = nombreBaseActual()
             guardarSrt.launch("$base.srt")
         }
 
@@ -196,7 +205,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun guardarResultadoEn(uri: Uri) {
-        val texto = envolverTexto(b.txtResult.text.toString())
+        val texto = envolverTexto(textoPendienteExportar ?: return)
+        textoPendienteExportar = null
         lifecycleScope.launch {
             val ok = withContext(Dispatchers.IO) {
                 try {
@@ -219,11 +229,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun guardarResultadoSrtEn(uri: Uri) {
-        val estado = viewModel.uiState.value as? TranscribeUiState.Done ?: return
-        val texto = estado.segments.mapIndexed { index, segmento ->
-            "${index + 1}\n${marcaSrt(segmento.startMs)} --> ${marcaSrt(segmento.endMs)}\n" +
-                segmento.text.trim() + "\n"
-        }.joinToString("\n")
+        val texto = srtPendienteExportar ?: return
+        srtPendienteExportar = null
         lifecycleScope.launch {
             val ok = withContext(Dispatchers.IO) {
                 try {
@@ -241,6 +248,19 @@ class MainActivity : AppCompatActivity() {
                 Toast.LENGTH_SHORT
             ).show()
         }
+    }
+
+    private fun construirSrt(estado: TranscribeUiState.Done): String =
+        estado.segments.mapIndexed { index, segmento ->
+            (index + 1).toString() + "\n" +
+                marcaSrt(segmento.startMs) + " --> " + marcaSrt(segmento.endMs) + "\n" +
+                segmento.text.trim() + "\n"
+        }.joinToString("\n")
+
+    private fun nombreBaseActual(): String {
+        val estado = viewModel.uiState.value as? TranscribeUiState.Done
+        val nombre = estado?.sourceName ?: selectedUri?.let(::displayName) ?: "transcripcion"
+        return nombre.substringBeforeLast('.').ifBlank { "transcripcion" }
     }
 
     private fun marcaSrt(milisegundos: Long): String {

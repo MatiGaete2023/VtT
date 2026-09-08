@@ -43,12 +43,15 @@ object AudioDecoder {
         }
     }
 
-    fun decode(context: Context, uri: Uri): FloatArray {
+    fun decode(
+        context: Context,
+        uri: Uri,
+        isCancelled: () -> Boolean = { false }
+    ): FloatArray {
         val extractor = MediaExtractor()
-        val pfd = context.contentResolver.openFileDescriptor(uri, "r")
-            ?: throw IllegalArgumentException("No se pudo abrir el archivo de audio")
-
         return try {
+            val pfd = context.contentResolver.openFileDescriptor(uri, "r")
+                ?: throw IllegalArgumentException("No se pudo abrir el archivo de audio")
             pfd.use {
                 extractor.setDataSource(it.fileDescriptor)
                 val trackIndex = selectAudioTrack(extractor)
@@ -61,7 +64,7 @@ object AudioDecoder {
                 val srcRate = format.getInteger(MediaFormat.KEY_SAMPLE_RATE)
                 val srcChannels = format.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
 
-                val pcm = decodePcm16(extractor, format, mime, srcRate, srcChannels)
+                val pcm = decodePcm16(extractor, format, mime, srcRate, srcChannels, isCancelled)
                 val shorts = ShortArray(pcm.bytes.size / 2)
                 ByteBuffer.wrap(pcm.bytes).order(ByteOrder.LITTLE_ENDIAN)
                     .asShortBuffer().get(shorts)
@@ -91,7 +94,8 @@ object AudioDecoder {
         inputFormat: MediaFormat,
         mime: String,
         fallbackRate: Int,
-        fallbackChannels: Int
+        fallbackChannels: Int,
+        isCancelled: () -> Boolean
     ): Pcm {
         val codec = MediaCodec.createDecoderByType(mime)
         try {
@@ -107,6 +111,7 @@ object AudioDecoder {
             var outChannels = fallbackChannels
 
             while (!sawOutputEOS) {
+            if (isCancelled()) throw java.util.concurrent.CancellationException("decodificación cancelada")
             if (!sawInputEOS) {
                 val inIndex = codec.dequeueInputBuffer(timeoutUs)
                 if (inIndex >= 0) {
@@ -149,6 +154,14 @@ object AudioDecoder {
                     }
                     if (of.containsKey(MediaFormat.KEY_CHANNEL_COUNT)) {
                         outChannels = of.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
+                    }
+                    val encoding = if (of.containsKey(MediaFormat.KEY_PCM_ENCODING)) {
+                        of.getInteger(MediaFormat.KEY_PCM_ENCODING)
+                    } else {
+                        android.media.AudioFormat.ENCODING_PCM_16BIT
+                    }
+                    require(encoding == android.media.AudioFormat.ENCODING_PCM_16BIT) {
+                        "El decodificador entregó PCM no compatible"
                     }
                 }
             }

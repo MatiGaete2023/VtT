@@ -68,12 +68,17 @@ class TranscribeViewModel : ViewModel() {
     ) {
         if (isWorking) return
         cancelSolicitado = false
+        transcriber.resetAbort()
         ultimoModelo = model
         ultimoIdioma = lang
         ultimoOrigen = sourceName
         job = viewModelScope.launch {
             try {
-                if (!ModelManager.isDownloaded(appContext, model)) {
+                _uiState.value = TranscribeUiState.Working("Comprobando el modelo…", null)
+                val modeloDisponible = withContext(Dispatchers.IO) {
+                    ModelManager.isDownloaded(appContext, model)
+                }
+                if (!modeloDisponible) {
                     _uiState.value = TranscribeUiState.Working(
                         "Descargando modelo '$model' (solo la primera vez)…", 0)
                 } else {
@@ -97,7 +102,7 @@ class TranscribeViewModel : ViewModel() {
                 }
                 _uiState.value = TranscribeUiState.Working("Procesando el audio…$avisoLargo", null)
                 val audio = withContext(Dispatchers.IO) {
-                    AudioDecoder.decode(appContext, uri)
+                    AudioDecoder.decode(appContext, uri) { cancelSolicitado }
                 }
                 if (cancelSolicitado) throw java.util.concurrent.CancellationException("cancelada")
                 if (audio.isEmpty()) {
@@ -108,6 +113,7 @@ class TranscribeViewModel : ViewModel() {
                 val resultado = withContext(Dispatchers.Default) {
                     if (cancelSolicitado) throw java.util.concurrent.CancellationException("cancelada")
                     transcriber.loadModel(modelFile.absolutePath, model)
+                    if (cancelSolicitado) throw java.util.concurrent.CancellationException("cancelada")
                     transcriber.transcribe(audio, lang.ifEmpty { null }) { pct ->
                         _uiState.value = TranscribeUiState.Working(
                             "Transcribiendo en el dispositivo…", pct)
@@ -117,12 +123,7 @@ class TranscribeViewModel : ViewModel() {
                 if (cancelSolicitado) {
                     _uiState.value = TranscribeUiState.Cancelled
                 } else {
-                    _uiState.value = TranscribeUiState.Done(
-                        resultado.text,
-                        sourceName = sourceName,
-                        segments = resultado.segments
-                    )
-                    viewModelScope.launch(Dispatchers.IO) {
+                    withContext(Dispatchers.IO) {
                         TranscriptionStore.save(
                             appContext,
                             resultado.text,
@@ -133,6 +134,12 @@ class TranscribeViewModel : ViewModel() {
                             resultado.segments
                         )
                     }
+                    if (cancelSolicitado) throw java.util.concurrent.CancellationException("cancelada")
+                    _uiState.value = TranscribeUiState.Done(
+                        resultado.text,
+                        sourceName = sourceName,
+                        segments = resultado.segments
+                    )
                 }
             } catch (e: CancellationException) {
                 if (cancelSolicitado) {

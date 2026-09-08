@@ -18,6 +18,9 @@ class WhisperBridge {
     /** Pide cancelar una transcripcion en curso con este handle (cualquier hilo). */
     external fun nativeRequestAbort(handle: Long)
 
+    /** Prepara un handle ya cargado para un nuevo trabajo, antes de decodificar. */
+    external fun nativeResetAbort(handle: Long)
+
     external fun nativeTranscribe(
         handle: Long,
         audio: FloatArray,

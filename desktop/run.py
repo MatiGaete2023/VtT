@@ -31,6 +31,7 @@ VENV_DIR = AQUI / ".venv"
 APP = AQUI / "transcriptor_whisper.py"
 REQS = AQUI / "requirements.txt"
 MARKER = VENV_DIR / ".deps_ok"
+MODULOS_REQUERIDOS = ("faster_whisper", "yt_dlp", "sounddevice", "soundcard")
 
 
 def venv_python(venv_dir: Path) -> Path:
@@ -68,15 +69,33 @@ def deps_al_dia() -> bool:
         return False
 
 
+def entorno_importable(py: Path) -> bool:
+    """Comprueba imports reales del entorno, no solo el hash de requirements.
+
+    Una carpeta .venv copiada o una instalación nativa incompleta puede tener
+    el marcador correcto y aun así fallar recién al transcribir. Esta prueba
+    no abre la interfaz ni descarga modelos.
+    """
+    try:
+        codigo = "import " + ", ".join(MODULOS_REQUERIDOS)
+        return subprocess.run([str(py), "-c", codigo], check=False).returncode == 0
+    except OSError:
+        return False
+
+
 def instalar_deps(py: Path):
     print("[2/2] Instalando dependencias (requiere internet la primera vez o "
           "cuando se agregan nuevas)...")
     try:
         subprocess.check_call([str(py), "-m", "pip", "install", "--upgrade", "pip"])
-        subprocess.check_call([str(py), "-m", "pip", "install", "-r", str(REQS)])
+        subprocess.check_call([str(py), "-m", "pip", "install", "--upgrade", "-r", str(REQS)])
     except subprocess.CalledProcessError as e:
         print(f"\nError instalando dependencias: {e}")
         print("Revisa tu conexion a internet y vuelve a ejecutar 'python run.py'.")
+        sys.exit(1)
+    if not entorno_importable(py):
+        print("\nLas dependencias se instalaron, pero una no se puede importar.")
+        print("Revisa el detalle anterior y ejecuta de nuevo: python run.py --update")
         sys.exit(1)
     MARKER.write_text(hash_requirements(), encoding="utf-8")
 
@@ -92,13 +111,13 @@ def main():
         sys.exit(1)
 
     py = venv_python(VENV_DIR)
-    forzar = "--update" in sys.argv
+    forzar = "--update" in sys.argv or "--repair" in sys.argv
 
     if not py.exists():
         crear_venv()
         py = venv_python(VENV_DIR)
 
-    if forzar or not deps_al_dia():
+    if forzar or not deps_al_dia() or not entorno_importable(py):
         instalar_deps(py)
 
     # Lanza la interfaz grafica con el Python del entorno virtual.

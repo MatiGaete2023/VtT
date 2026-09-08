@@ -3,6 +3,7 @@
 // progreso y cancelacion), y liberar.
 #include <jni.h>
 #include <atomic>
+#include <cctype>
 #include <cstdio>
 #include <string>
 #include <vector>
@@ -125,6 +126,14 @@ Java_cl_vtt_transcriptor_WhisperBridge_nativeRequestAbort(
     }
 }
 
+JNIEXPORT void JNICALL
+Java_cl_vtt_transcriptor_WhisperBridge_nativeResetAbort(
+        JNIEnv * /* env */, jobject /* this */, jlong handlePtr) {
+    if (handlePtr != 0) {
+        reinterpret_cast<Handle *>(handlePtr)->abort.store(false);
+    }
+}
+
 // Transcribe audio mono a 16 kHz (float [-1,1]).
 // lang: codigo ISO ("es", "en", ...) o cadena vacia/null para deteccion automatica.
 // listener: objeto con metodo onProgress(int), o null si no interesa el progreso.
@@ -142,7 +151,9 @@ Java_cl_vtt_transcriptor_WhisperBridge_nativeTranscribe(
     if (handle->ctx == nullptr) {
         return env->NewStringUTF("__VTT_ERROR__:modelo no cargado");
     }
-    handle->abort.store(false);  // por si se reutiliza el mismo handle
+    if (handle->abort.load()) {
+        return env->NewStringUTF("__VTT_CANCELLED__");
+    }
 
     const jsize n = env->GetArrayLength(jAudio);
     std::vector<float> audio(static_cast<size_t>(n));
@@ -163,6 +174,7 @@ Java_cl_vtt_transcriptor_WhisperBridge_nativeTranscribe(
     wparams.single_segment   = false;
     wparams.no_context       = true;
     wparams.n_threads        = nThreads > 0 ? nThreads : 4;
+    wparams.token_timestamps = true;
 
     if (lang != nullptr && lang[0] != '\0') {
         wparams.language = lang;        // idioma forzado
@@ -208,7 +220,41 @@ Java_cl_vtt_transcriptor_WhisperBridge_nativeTranscribe(
             const int64_t t1 = whisper_full_get_segment_t1(handle->ctx, i);
             result += "{\"startMs\":" + std::to_string(t0 * 10) +
                       ",\"endMs\":" + std::to_string(t1 * 10) +
-                      ",\"text\":\"" + escapar_json(segText) + "\"}";
+                      ",\"text\":\"" + escapar_json(segText) + "\",\"words\":[";
+            std::string palabra;
+            int64_t inicio_palabra = -1;
+            int64_t fin_palabra = -1;
+            bool primera_palabra = true;
+            const auto emitir_palabra = [&]() {
+                if (palabra.empty()) return;
+                if (!primera_palabra) result += ",";
+                primera_palabra = false;
+                result += "{\"startMs\":" +
+                          (inicio_palabra >= 0 ? std::to_string(inicio_palabra * 10) : "null") +
+                          ",\"endMs\":" +
+                          (fin_palabra >= 0 ? std::to_string(fin_palabra * 10) : "null") +
+                          ",\"text\":\"" + escapar_json(palabra.c_str()) + "\"}";
+                palabra.clear();
+                inicio_palabra = -1;
+                fin_palabra = -1;
+            };
+            const int nTokens = whisper_full_n_tokens(handle->ctx, i);
+            for (int j = 0; j < nTokens; ++j) {
+                const char *token_text = whisper_full_get_token_text(handle->ctx, i, j);
+                if (token_text == nullptr || token_text[0] == '\0') continue;
+                const auto token = whisper_full_get_token_data(handle->ctx, i, j);
+                const bool separa = !palabra.empty() &&
+                    std::isspace(static_cast<unsigned char>(token_text[0]));
+                if (separa) emitir_palabra();
+                while (*token_text &&
+                       std::isspace(static_cast<unsigned char>(*token_text))) ++token_text;
+                if (token_text[0] == '\0') continue;
+                if (inicio_palabra < 0) inicio_palabra = token.t0;
+                fin_palabra = token.t1;
+                palabra += token_text;
+            }
+            emitir_palabra();
+            result += "]}";
         }
         result += "]}";
     } else if (rc != 0) {

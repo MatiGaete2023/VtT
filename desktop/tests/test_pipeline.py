@@ -144,6 +144,16 @@ def test_hash_requirements_es_sha256():
     assert run_mod.hash_requirements() == esperado
 
 
+def test_entorno_importable_detecta_error_de_importacion(tmp_path, monkeypatch):
+    run_mod = _cargar_run_module()
+
+    class Resultado:
+        returncode = 1
+
+    monkeypatch.setattr(run_mod.subprocess, "run", lambda *args, **kwargs: Resultado())
+    assert run_mod.entorno_importable(tmp_path / "python") is False
+
+
 # ---------- rutas persistentes (grabaciones/transcripciones nunca en temporales) ----------
 
 def test_es_temporal_true_dentro_de_carpeta_temp(tmp_path):

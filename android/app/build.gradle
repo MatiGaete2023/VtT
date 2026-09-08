@@ -13,6 +13,8 @@ def tieneKeystore = keystorePropertiesFile.exists()
 if (tieneKeystore) {
     keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
 }
+def vttVersionCode = (project.findProperty('VTT_VERSION_CODE') ?: '1').toInteger()
+def vttVersionName = (project.findProperty('VTT_VERSION_NAME') ?: '1.0').toString()
 
 android {
     namespace 'cl.vtt.transcriptor'
@@ -23,8 +25,10 @@ android {
         applicationId 'cl.vtt.transcriptor'
         minSdk 24
         targetSdk 34
-        versionCode 1
-        versionName '1.0'
+        // El workflow de release inyecta un código creciente. El valor por
+        // defecto se conserva para compilar localmente sin credenciales.
+        versionCode vttVersionCode
+        versionName vttVersionName
 
         // Solo ARM de 64 bits: cubre practicamente todos los telefonos actuales
         // y mantiene el APK liviano (la prioridad es "bajar solo lo necesario").
