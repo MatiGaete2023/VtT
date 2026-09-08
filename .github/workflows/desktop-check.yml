@@ -44,7 +44,10 @@ jobs:
           vtt_diarization_v4.py vtt_diarization_process_v4.py
           vtt_enhanced.py vtt_app.py vtt_ui_v4.py vtt_tuning.py
           vtt_reporting.py vtt_reporting_v4.py
-          vtt_pipeline.py vtt_pipeline_v4.py vtt_main.py run.py
+          vtt_pipeline.py vtt_pipeline_v4.py
+          vtt_alignment.py vtt_diarization_v5.py vtt_diarization_service.py
+          vtt_reporting_v5.py vtt_validation.py vtt_pipeline_v5.py
+          vtt_main.py run.py
 
       - name: Instalar dependencias de pruebas
         run: python -m pip install --upgrade pip pytest python-docx
