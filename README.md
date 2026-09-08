@@ -1,75 +1,62 @@
-# VtT — Transcriptor de voz a texto (multiplataforma)
+# VtT — Transcriptor local de voz a texto
 
-Transcribe audio y video a texto **en tu propio equipo**, sin servicios en la nube.
-El motor es [Whisper](https://github.com/openai/whisper) (de OpenAI), ejecutado
-localmente. Pensado para **instalarse y funcionar en cualquier equipo con la menor
-configuración posible**: solo descarga lo que necesita para funcionar.
+VtT transcribe audio y video **en tu propio equipo**. El audio no se envía a servicios de transcripción en la nube. En PC usa `faster-whisper`/CTranslate2; en Android usa `whisper.cpp`.
 
-| Plataforma | Cómo se instala | Dónde |
-|---|---|---|
-| **Windows · macOS · Linux** | Doble clic en `run.bat` / `run.sh` (o `python run.py`). Se auto-instala la 1ª vez. | [`desktop/`](desktop/) |
-| **Android** | Descargas e instalas un APK (lo construye GitHub Actions). 100 % offline. | [`android/`](android/) |
+## PC — Windows, macOS y Linux
 
-## Idea general
+Requisito: **Python 3.9 o superior**. En Windows, la forma normal de abrirlo es `desktop/run.bat`; también puedes ejecutar `python desktop/run.py`. El lanzador crea un entorno `.venv`, instala o actualiza las dependencias cuando cambia `requirements.txt` y abre la aplicación mejorada.
 
-- **No requiere configuración compleja.** En PC solo necesitas Python; en Android,
-  solo instalar el APK.
-- **Descarga solo lo necesario.** Las dependencias y el modelo de voz se bajan una
-  única vez la primera vez; después funciona sin conexión.
-- **Privado.** El audio nunca sale de tu equipo: la transcripción es local.
+Funciones principales del escritorio:
 
-## Empezar rápido
+- perfiles **Rápido**, **Equilibrado** y **Preciso**;
+- batching con `faster-whisper` en los perfiles Rápido/Equilibrado;
+- CPU `int8` como ruta segura y GPU CUDA solo si el equipo ya dispone de un entorno compatible; si falla, vuelve a CPU;
+- filtro VAD y marcas por palabra opcionales;
+- glosario/hotwords para nombres propios y términos frecuentes;
+- diarización local opcional: `Persona 1`, `Persona 2`, etc.;
+- bloques de lectura de mayor tamaño para TXT/Markdown/Word, manteniendo los segmentos finos para SRT/VTT;
+- exportación `.txt`, `.md`, `.srt`, `.vtt`, `.json` y **`.docx`**;
+- JSON maestro v2 con segmentos, bloques de lectura, hablantes, métricas y marcas de revisión;
+- marcas de baja confianza para orientar la revisión humana, sin eliminar texto;
+- ventana de revisión: reproducir audio desde un bloque, renombrar hablantes y exportar una versión revisada sin sobrescribir el original;
+- grabación desde micrófono y captura de audio del sistema;
+- descarga de audio de YouTube;
+- procesamiento por lotes y guardado parcial al cancelar.
 
-### En computador (Windows / macOS / Linux)
+Formatos admitidos oficialmente en PC: `.mp3`, `.wav`, `.m4a`, `.ogg`, `.flac`, `.aac`, `.wma`, `.opus`, `.aif`, `.aiff`, `.mp4`, `.webm`, `.mkv`, `.avi`, `.mov`, `.m4v`, `.mpeg`, `.mpg`, `.3gp`, `.ts` y `.m2ts`. Además de la extensión, VtT comprueba que el archivo contenga una pista de audio decodificable.
 
-1. Instala **Python 3.8+** (en Windows marca *"Add Python to PATH"*).
-2. Entra a la carpeta [`desktop/`](desktop/) y ejecuta:
-   - Windows: doble clic en **`run.bat`**
-   - macOS / Linux: **`./run.sh`**
-   - Cualquiera: **`python run.py`**
+La diarización usa `sherpa-onnx`. La primera vez que se activa descarga dos modelos oficiales (~7 MB y ~40 MB); después funciona offline. Los assets históricos de GitHub no publican un SHA-256 de origen, por lo que VtT verifica origen HTTPS y tamaño en la primera descarga y guarda un SHA-256 local para detectar alteraciones posteriores. Esta limitación está documentada deliberadamente: no se inventan hashes de confianza.
 
-La primera vez crea su entorno, instala lo necesario y abre la app.
-Detalles y solución de problemas: [`desktop/README.md`](desktop/README.md).
+Consulta [`desktop/README.md`](desktop/README.md) para instalación, uso y solución de problemas.
 
-### En Android
+## Android
 
-1. En **Actions → "Android APK"**, descarga el artefacto `TranscriptorVtT-debug-apk`
-   (o el APK de la *release* `android-latest`).
-2. Instálalo en el teléfono (acepta "orígenes desconocidos").
-3. Elige modelo e idioma, selecciona un audio y toca **Transcribir**.
+La app Android nativa usa `whisper.cpp` y mantiene la inferencia local. Consulta [`android/README.md`](android/README.md) para instalación y funcionamiento. Las mejoras de presentación del escritorio se implementan primero y se validan antes de trasladar componentes pesados de diarización al APK.
 
-Detalles: [`android/README.md`](android/README.md).
+## Estructura
 
-## Estructura del repositorio
-
-```
-desktop/                 App de escritorio (Tkinter + faster-whisper) y auto-instalador
-  transcriptor_whisper.py  La aplicación (multiplataforma)
-  run.py                   Lanzador que auto-instala dependencias en un entorno local
-  requirements.txt         Dependencias (faster-whisper, yt-dlp, sounddevice, soundcard)
-  run.bat / run.sh         Accesos directos para Windows / macOS / Linux
-android/                 App Android nativa (Kotlin + whisper.cpp vía JNI)
-  app/src/main/cpp/        Puente JNI y CMake (descarga whisper.cpp al compilar)
-  app/src/main/java/…      UI y lógica (descarga de modelo, decodificación, transcripción)
-.github/workflows/
-  android-build.yml        Construye el APK automáticamente y lo publica como artefacto
-  desktop-build.yml        (Opcional) genera ejecutables independientes para PC
+```text
+desktop/
+  transcriptor_whisper.py   base estable: UI, grabación, YouTube y utilidades
+  vtt_core.py               agrupación, métricas, JSON v2 y exportaciones
+  vtt_diarization.py        diarización offline y gestión de modelos
+  vtt_enhanced.py           aplicación VtT mejorada
+  run.py                    lanzador/autoinstalador
+  tests/                    pruebas del pipeline y de las mejoras
+android/                    app Kotlin + whisper.cpp
+.github/workflows/          CI y builds
 ```
 
-## Funciones
+## Privacidad
 
-- Modelos Whisper: `tiny`, `base`, `small` (y en PC también `medium`, `large-v3`).
-- Idiomas: español, inglés, portugués, francés y detección automática.
-- PC: graba desde el **micrófono** o desde el **audio del sistema** (lo que suena en
-  Chrome, apps, videollamadas — nativo en Windows/Linux, requiere BlackHole en macOS),
-  exporta `.txt` (con líneas ajustadas para leer sin scroll horizontal), `.md`, `.srt`,
-  `.vtt` y `.json` estructurado con tiempos; además descarga audio de YouTube.
-- Android: transcribe archivos del teléfono, conserva la revisión local y permite
-  copiar, compartir, guardar `.txt` o exportar `.srt` con tiempos.
+La inferencia de voz y la diarización se realizan localmente. Solo se necesita Internet para instalar/actualizar dependencias, descargar por primera vez los modelos seleccionados y usar la función explícita de descarga desde YouTube.
 
 ## Créditos
 
-- [openai/whisper](https://github.com/openai/whisper) — modelo de transcripción.
-- [SYSTRAN/faster-whisper](https://github.com/SYSTRAN/faster-whisper) — motor en PC (CTranslate2).
-- [ggerganov/whisper.cpp](https://github.com/ggerganov/whisper.cpp) — motor en Android.
-- [yt-dlp/yt-dlp](https://github.com/yt-dlp/yt-dlp) — descarga de audio de YouTube.
+- OpenAI Whisper
+- SYSTRAN `faster-whisper`
+- CTranslate2
+- `sherpa-onnx` / k2-fsa para diarización local
+- `python-docx` para exportación Word
+- `yt-dlp`
+- `whisper.cpp` en Android

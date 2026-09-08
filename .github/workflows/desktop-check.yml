@@ -1,9 +1,5 @@
 name: Desktop checks
 
-# Verificacion rapida de la app de escritorio: sintaxis + pruebas unitarias.
-# NO instala faster-whisper/sounddevice/soundcard (son pesadas y el modulo
-# las importa de forma perezosa, solo dentro de funciones), por eso este
-# workflow corre en segundos en los 3 sistemas operativos.
 on:
   push:
     branches:
@@ -41,10 +37,12 @@ jobs:
 
       - name: Compilar (verificacion de sintaxis)
         working-directory: desktop
-        run: python -m py_compile transcriptor_whisper.py run.py
+        run: >-
+          python -m py_compile
+          transcriptor_whisper.py vtt_core.py vtt_diarization.py vtt_enhanced.py run.py
 
-      - name: Instalar pytest
-        run: python -m pip install --upgrade pip pytest
+      - name: Instalar dependencias de pruebas
+        run: python -m pip install --upgrade pip pytest python-docx
 
       - name: Ejecutar pruebas
         working-directory: desktop

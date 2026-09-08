@@ -8,6 +8,7 @@ desktop/*.spec
 transcriptor_config.json
 desktop/grabaciones/
 desktop/transcripciones/
+desktop/modelos_hablantes/
 
 # ---- Android / Gradle ----
 android/.gradle/

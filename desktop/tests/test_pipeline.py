@@ -20,8 +20,6 @@ sys.path.insert(0, str(DESKTOP_DIR))
 import transcriptor_whisper as tw  # noqa: E402
 
 
-# ---------- entradas de audio para la UI ----------
-
 def test_etiquetas_entradas_audio_usa_tuplas_de_cinco_campos():
     entradas = [
         ("sd", 3, "🎤 Micrófono WASAPI", False, 1),
@@ -32,8 +30,6 @@ def test_etiquetas_entradas_audio_usa_tuplas_de_cinco_campos():
         "🔊 Altavoces (audio del sistema)",
     ]
 
-
-# ---------- envolver_texto (ajuste de lineas del .txt/.md) ----------
 
 def test_envolver_texto_respeta_ancho():
     texto = "palabra " * 40
@@ -54,12 +50,6 @@ def test_envolver_texto_sin_ajuste():
     texto = "x" * 500
     assert tw.envolver_texto(texto, ancho=0) == texto
 
-
-# ---------- hilo escritor de grabacion (writer thread) ----------
-# Reproduce, sin microfono real, la tuberia callback -> cola -> hilo escritor
-# que graba el audio a disco. `_writer_grab` solo toca self.cola_grab,
-# self.grab_stop, self.grab_descarta y self.wave_file, asi que se puede
-# probar con un objeto liviano en vez de instanciar la app de Tk completa.
 
 def test_writer_grab_produce_wav_correcto(tmp_path):
     rate = 16000
@@ -100,13 +90,11 @@ def test_writer_grab_produce_wav_correcto(tmp_path):
     assert len(leidas) > 0
 
     rms = math.sqrt(sum(x * x for x in leidas) / len(leidas))
-    assert 5000 < rms < 6200  # esperado ~5657 para amplitud 8000
+    assert 5000 < rms < 6200
 
     descartadas = total - w.getnframes()
-    assert descartadas == descarte_esperado  # se descarto el pop de arranque
+    assert descartadas == descarte_esperado
 
-
-# ---------- hash de requirements.txt (run.py) ----------
 
 def _cargar_run_module():
     spec = importlib.util.spec_from_file_location("run_mod", DESKTOP_DIR / "run.py")
@@ -126,14 +114,9 @@ def test_hash_requirements_detecta_falta_e_igualdad_y_cambio(tmp_path):
     run_mod.REQS = reqs
     run_mod.MARKER = marker
 
-    # Sin marcador -> hace falta instalar.
     assert run_mod.deps_al_dia() is False
-
-    # Marcador con el hash correcto -> no hace falta instalar.
     marker.write_text(run_mod.hash_requirements(), encoding="utf-8")
     assert run_mod.deps_al_dia() is True
-
-    # requirements.txt cambio (nueva dependencia) -> hace falta reinstalar.
     reqs.write_text("faster-whisper>=1.0.0\nsoundcard>=0.4.2\n")
     assert run_mod.deps_al_dia() is False
 
@@ -153,8 +136,6 @@ def test_entorno_importable_detecta_error_de_importacion(tmp_path, monkeypatch):
     monkeypatch.setattr(run_mod.subprocess, "run", lambda *args, **kwargs: Resultado())
     assert run_mod.entorno_importable(tmp_path / "python") is False
 
-
-# ---------- rutas persistentes (grabaciones/transcripciones nunca en temporales) ----------
 
 def test_es_temporal_true_dentro_de_carpeta_temp(tmp_path):
     fake = SimpleNamespace(temp_dirs=[str(tmp_path)])
@@ -205,13 +186,11 @@ def test_carpetas_persistentes_existen():
     assert tw.CARPETA_TRANSCRIPCIONES.is_dir()
 
 
-# ---------- historial de carpetas de salida ----------
-
 def test_registrar_salida_dedupe_y_orden():
     fake = SimpleNamespace(historial_salidas=[], _snapshot_config=lambda: None)
     tw.TranscriptorApp._registrar_salida(fake, "/a")
     tw.TranscriptorApp._registrar_salida(fake, "/b")
-    tw.TranscriptorApp._registrar_salida(fake, "/a")  # ya estaba: vuelve al frente
+    tw.TranscriptorApp._registrar_salida(fake, "/a")
     assert fake.historial_salidas == ["/a", "/b"]
 
 
@@ -220,10 +199,8 @@ def test_registrar_salida_tope_10():
     for i in range(15):
         tw.TranscriptorApp._registrar_salida(fake, f"/carpeta{i}")
     assert len(fake.historial_salidas) == 10
-    assert fake.historial_salidas[0] == "/carpeta14"  # la mas reciente va primero
+    assert fake.historial_salidas[0] == "/carpeta14"
 
-
-# ---------- exportacion segura ----------
 
 def test_exportacion_conserva_puntos_del_nombre_y_no_sobrescribe(tmp_path):
     app = SimpleNamespace()
@@ -263,7 +240,7 @@ def test_json_conserva_segmentos_palabras_y_campo_de_hablante():
 
 
 def test_exportacion_por_lote_continua_despues_de_error(tmp_path, monkeypatch):
-    """El error de un archivo no debe cancelar el resto del lote."""
+    """El error de un archivo no cancela el resto y el lote termina como parcial."""
     app = SimpleNamespace()
     app.modelo = None
     app.modelo_nombre = None
@@ -286,10 +263,13 @@ def test_exportacion_por_lote_continua_despues_de_error(tmp_path, monkeypatch):
     app.modelo_nombre = "base"
     fake_fw = SimpleNamespace(WhisperModel=lambda *args, **kwargs: app.modelo)
     monkeypatch.setitem(sys.modules, "faster_whisper", fake_fw)
-    tw.TranscriptorApp._worker(app,
-                               [str(tmp_path / "uno.wav"), str(tmp_path / "malo.wav"),
-                                str(tmp_path / "tres.wav")], "base", "es", str(tmp_path),
-                               {"txt": True, "md": False, "srt": False, "vtt": False}, True, False)
+    tw.TranscriptorApp._worker(
+        app,
+        [str(tmp_path / "uno.wav"), str(tmp_path / "malo.wav"), str(tmp_path / "tres.wav")],
+        "base", "es", str(tmp_path),
+        {"txt": True, "md": False, "srt": False, "vtt": False}, True, False,
+    )
     eventos = list(app.cola.queue)
     assert [e[0] for e in eventos].count("archivo_fallido") == 1
-    assert any(e[0] == "log" and "=== Completado ===" in e[1] for e in eventos)
+    assert any(e[0] == "lote_parcial" and e[1] == (2, 1) for e in eventos)
+    assert any(e[0] == "done" for e in eventos)

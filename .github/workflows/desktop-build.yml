@@ -1,7 +1,6 @@
 name: Desktop executables
 
 # Opcional: genera ejecutables independientes (no necesitan instalar Python).
-# Se ejecuta manualmente desde la pestaña Actions.
 on:
   workflow_dispatch:
 
@@ -33,22 +32,24 @@ jobs:
         working-directory: desktop
         run: >
           pyinstaller --noconfirm --onefile --windowed
-          --name TranscriptorWhisper
+          --name VtT
           --collect-all faster_whisper
           --collect-all ctranslate2
           --collect-all onnxruntime
+          --collect-all sherpa_onnx
           --collect-all av
           --collect-all tokenizers
+          --collect-all docx
           --collect-all sounddevice
           --collect-all soundcard
           --collect-all numpy
           --collect-all cffi
-          transcriptor_whisper.py
+          vtt_enhanced.py
 
       - name: Upload executable
         uses: actions/upload-artifact@v4
         with:
-          name: TranscriptorWhisper-${{ matrix.os }}
+          name: VtT-${{ matrix.os }}
           path: |
-            desktop/dist/TranscriptorWhisper*
+            desktop/dist/VtT*
           if-no-files-found: error

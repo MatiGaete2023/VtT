@@ -1,160 +1,145 @@
-# Transcriptor Whisper — versión de escritorio (Windows · macOS · Linux)
+# VtT — versión de escritorio
 
-Transcribe audio y video a texto **en tu propio equipo**, sin enviar nada a internet
-(salvo la descarga inicial del programa y del modelo). Funciona igual en Windows,
-macOS y Linux, **sin permisos de administrador**.
+**Fecha de esta guía:** 8 de septiembre de 2026.
 
-## Lo único que necesitas
+VtT transcribe audio y video localmente en Windows, macOS y Linux. La inferencia no envía el audio a una API externa.
 
-**Python 3.8 o superior** instalado.
+## 1. Requisitos e instalación
 
-- **Windows / macOS:** descárgalo de <https://www.python.org/downloads/>.
-  En Windows, marca la casilla **"Add Python to PATH"** durante la instalación.
-- **Linux (Debian/Ubuntu):** `sudo apt install python3 python3-venv python3-tk`
+Necesitas **Python 3.9 o superior**. Esta versión eleva el mínimo anterior de 3.8 porque `faster-whisper` actual requiere Python >=3.9.
 
-> El propio Python ya incluye la interfaz gráfica (Tkinter). En Linux, el paquete
-> `python3-tk` la habilita; en macOS usa el instalador oficial de python.org para
-> que Tkinter venga incluido.
+En Windows:
 
-## Cómo usarlo (instala solo lo necesario, la primera vez)
+1. Instala Python desde python.org y marca `Add Python to PATH` si el instalador lo ofrece.
+2. Entra a `desktop/`.
+3. Haz doble clic en `run.bat`.
 
-1. Descarga esta carpeta `desktop/` en tu equipo.
-2. Ábrela y ejecuta:
-   - **Windows:** doble clic en **`run.bat`**
-   - **macOS / Linux:** doble clic en **`run.sh`** (o en una terminal: `./run.sh`)
-   - **Cualquier sistema:** `python run.py`
+Alternativamente: `python run.py` (o `py run.py` en Windows).
 
-La primera vez, el lanzador:
+El lanzador crea `desktop/.venv`, instala las dependencias y recuerda un SHA-256 de `requirements.txt`. Si las dependencias cambian, se actualizan automáticamente. `python run.py --update` fuerza la reinstalación.
 
-1. Crea un entorno aislado (`.venv`) dentro de la carpeta.
-2. Descarga **solo** las dependencias necesarias (ver `requirements.txt`).
-3. Abre la aplicación.
+## 2. Flujo recomendado
 
-La **primera transcripción** descarga una vez el modelo de voz elegido y lo guarda
-en tu equipo. A partir de ahí funciona **sin conexión**.
+1. Agrega uno o más archivos, graba desde micrófono/sistema o descarga el audio de YouTube.
+2. Elige el modelo Whisper y el idioma.
+3. En `VtT > Opciones avanzadas…` elige perfil, Word, hablantes, glosario y tamaño de bloques.
+4. Pulsa **Transcribir**.
+5. Abre la carpeta de salida o `VtT > Revisar última transcripción…`.
 
-> Las siguientes veces ya no se descarga nada: el programa abre directo. **Si se agrega
-> una dependencia nueva** (por ejemplo al actualizar la app), el lanzador lo detecta
-> solo comparando `requirements.txt` y la instala automáticamente — no necesitas hacer
-> nada manual. `python run.py --update` fuerza la reinstalación completa igualmente.
+## 3. Perfiles de velocidad
 
-## ¿Qué hace?
+- **Rápido:** batching `8` y `beam_size=1`. Prioriza velocidad.
+- **Equilibrado:** batching `8` y `beam_size=5`. Es el perfil recomendado.
+- **Preciso:** ruta secuencial y `beam_size=5`. Útil para comparar audios difíciles.
 
-- Transcribe `.mp3 .wav .m4a .ogg .flac .mp4 .aac .wma .opus .webm .mkv .avi`.
-- **Graba desde el micrófono / entrada de audio** y agrega la grabación para transcribir.
-- Descarga audio de YouTube (pega la URL) para transcribirlo, con **barra de progreso**
-  de la descarga.
-- **Modo claro / oscuro**: botón 🌙/☀️ arriba a la derecha; se recuerda entre sesiones.
-- Modelos: `tiny`, `base`, `small`, `medium`, `large-v3` (más grande = más preciso y más lento).
-- Idiomas: español, inglés, portugués, francés o detección automática.
-- Exporta a `.txt`, `.md` (Obsidian), `.srt`, `.vtt` y `.json` estructurado. El
-  `.txt` viene **ajustado a ~100 caracteres por línea**, para leerlo sin desplazarte
-  hacia el lado. El JSON conserva segmentos, marcas por palabra disponibles y un
-  campo preparado para hablante; activa la opción `.json (tiempos)` para generarlo.
-- Conserva puntos internos del nombre (`audiencia.01`) y crea una copia numerada
-  si la salida ya existe; no sobrescribe una transcripción anterior.
-- Si cancelas después de obtener segmentos, guarda una salida parcial. En un lote,
-  un archivo defectuoso se registra y el programa continúa con los siguientes.
-- Mientras transcribe, el **Registro** muestra cada segmento a medida que sale y el
-  estado indica un **tiempo restante estimado**.
-- No necesita FFmpeg para transcribir (lo decodifica internamente). FFmpeg solo
-  mejora, opcionalmente, las descargas de YouTube.
-- **Arrastra y suelta** archivos de audio/video directo sobre la lista (necesita
-  el paquete opcional `tkinterdnd2`, ver abajo).
-- Atajos de teclado: **Ctrl+O** agrega archivos, **Ctrl+R** graba/detiene,
-  **Ctrl+Enter** transcribe (en macOS también funcionan con ⌘).
-- **Historial** (botón junto a "Abrir carpeta de salida"): accede rápido a las
-  últimas 10 carpetas donde se guardaron transcripciones.
+VtT usa CPU `int8` como ruta segura. Si `Usar GPU compatible automáticamente` está activo y CTranslate2 detecta CUDA utilizable, intenta GPU `float16`; ante error vuelve a CPU sin convertir CUDA en requisito.
 
-## Grabar micrófono o audio del sistema (Chrome, apps, etc.)
+Cada trabajo registra duración, tiempo de procesamiento, **RTF** (`tiempo_proceso / duración_audio`) y velocidad aproximada `x tiempo real`. Esos datos permiten comparar perfiles en el mismo PC.
 
-La lista **Entrada** muestra dos tipos de fuentes:
+## 4. Hablantes / diarización
 
-- 🎤 **Micrófono / línea** — tu voz, instrumentos, etc.
-- 🔊 **Captura de sistema** — lo que suena en el PC (Chrome, Spotify, videollamadas…)
+Activa `Identificar hablantes` para obtener `Persona 1`, `Persona 2`, etc. Puedes dejar el número en **Auto** o indicar entre 2 y 8 hablantes.
 
-**Cómo usarlo:**
+La diarización es una segunda inferencia local con `sherpa-onnx`, separada de Whisper. La primera vez descarga desde releases oficiales de k2-fsa:
 
-1. Elige la **Entrada** adecuada:
-   - Para grabar tu voz: elige tu micrófono (o deja "Predeterminada").
-   - Para grabar lo que suena en el PC: elige la opción con 🔊.
-2. Pulsa **● Grabar**.
-3. **Mira la barra "Nivel"**: debe moverse cuando hay audio. Si no sube, elige otra Entrada.
-4. Pulsa **■ Detener**. El archivo WAV se guarda y se agrega solo a la lista.
+- segmentación pyannote: ~6,96 MB;
+- embedding 3D-Speaker ERes2Net: ~39,59 MB.
 
-> Graba a la frecuencia nativa del dispositivo (o 48 kHz para audio de sistema) y mezcla
-> a mono internamente; Whisper remuestrea solo.
+Los assets históricos no ofrecen un digest SHA-256 de origen en la metadata de GitHub. VtT no inventa uno: comprueba HTTPS + tamaño exacto al descargar y guarda un SHA-256 local; en ejecuciones posteriores rechaza modificaciones respecto de ese pin local. Los modelos se guardan en la carpeta de datos de VtT y no se vuelven a descargar si están íntegros.
 
-Marca **"Transcribir automáticamente al detener"** para que, al pulsar ■ Detener, la
-transcripción arranque sola con la configuración actual (modelo, idioma, formatos).
+La diarización puede fallar con voces superpuestas, interrupciones rápidas, ruido o audio lejano. Por eso los nombres son etiquetas de trabajo y se pueden renombrar en la revisión.
 
-### Captura de audio del sistema por plataforma
+## 5. Segmentos técnicos vs. bloques de lectura
 
-| Plataforma | Soporte | Cómo |
-|---|---|---|
-| **Windows 10/11** | ✅ Nativo (WASAPI loopback vía librería `soundcard`) | Elige `🔊 … (audio del sistema)` en la lista. La primera vez la app ofrece instalar `soundcard` con un clic. |
-| **Linux** | ✅ Nativo (PulseAudio / PipeWire) | Elige `🔊 Monitor of …` en la lista. Si no aparece: `pactl load-module module-loopback`. |
-| **macOS** | ⚠️ Requiere driver virtual | Instala [BlackHole](https://existential.audio/blackhole/) (gratis) y selecciónalo como dispositivo de salida en preferencias de sonido; aparecerá en la lista como entrada. |
+Whisper sigue produciendo segmentos cortos. VtT **no los destruye**:
 
-> **La primera vez que grabes**, si falta algún componente (`sounddevice` para
-> micrófono, `soundcard` para audio de sistema en Windows), la app lo instala **en
-> segundo plano con un clic**, sin congelar la ventana. En Linux necesitas además:
-> `sudo apt install libportaudio2`.
+- SRT/VTT conservan los segmentos finos para sincronización;
+- JSON conserva los segmentos y sus métricas;
+- TXT/Markdown/DOCX agrupan esos segmentos en bloques legibles.
 
-## Arrastrar y soltar (opcional)
+Un bloque se corta por cambio de hablante, pausa relevante, fin de oración cuando ya tiene suficiente extensión o límites de tiempo/caracteres. Los valores de pausa y duración máxima pueden modificarse en Opciones avanzadas.
 
-Para agregar audios arrastrándolos directo desde el explorador de archivos,
-instala una vez el paquete opcional `tkinterdnd2`:
+## 6. Word y demás exportaciones
 
-```
-python -m pip install tkinterdnd2
-```
+Formatos disponibles:
 
-(o edítalo dentro del entorno: `.venv/bin/pip install tkinterdnd2` en macOS/Linux,
-`.venv\Scripts\pip install tkinterdnd2` en Windows). No es obligatorio: sin él, la
-app funciona igual, simplemente sin esa función — no se agregó a `requirements.txt`
-para no sumar una dependencia que no todos necesitan.
+- `.txt`: bloques de lectura;
+- `.md`: bloques de lectura con metadata;
+- `.docx`: documento Word estructurado y literal;
+- `.json`: fuente maestra v2;
+- `.srt` y `.vtt`: subtítulos con segmentos técnicos.
 
-## Dónde quedan las grabaciones y transcripciones
+El DOCX no “mejora” ni reescribe semánticamente lo dicho. Solo estructura el texto ASR, timestamps y hablantes. La revisión humana sigue siendo necesaria cuando el uso exige exactitud.
 
-Si no eliges una **carpeta de salida**, la app NUNCA guarda en carpetas temporales que
-se borran al cerrar:
+## 7. Glosario / hotwords
 
-- Las **grabaciones** (micrófono o sistema) quedan en `desktop/grabaciones/`.
-- Las **transcripciones** de audios descargados de YouTube (sin carpeta de salida
-  elegida) quedan en `desktop/transcripciones/`.
-- Las transcripciones de un archivo que ya tenías en el disco se guardan junto a ese
-  archivo, como siempre.
+En `Glosario / nombres importantes` escribe términos separados por coma o punto y coma. VtT elimina duplicados y los entrega a Whisper como `hotwords`. Es útil para nombres propios, instituciones, siglas y vocabulario recurrente.
 
-Ambas carpetas se crean solas junto al programa y no se suben al repositorio.
+## 8. Fragmentos para revisar
 
-## Llevarlo a otro equipo sin descargar de nuevo
+El JSON v2 conserva `avg_logprob`, `no_speech_prob` y `compression_ratio` cuando el motor los entrega. VtT usa umbrales conservadores para **marcar** bloques dudosos; nunca elimina ni corrige silenciosamente una frase basándose en esas métricas.
 
-En la versión ejecutada desde Python, los datos viven dentro de `desktop/`. En un
-ejecutable PyInstaller se guardan junto al ejecutable cuando esa carpeta es escribible;
-si el sistema la protege, se usa la carpeta de datos del usuario. La aplicación no usa
-la carpeta temporal de extracción para grabaciones o transcripciones. Los entornos
-virtuales no son portables entre equipos en general: para otro sistema operativo o una
-instalación de Python incompatible, copia tus datos y vuelve a ejecutar `run.py`.
+En la ventana de revisión puedes:
 
-## ¿Prefieres un ejecutable sin instalar Python?
+- ver los bloques en orden temporal;
+- reproducir unos segundos desde el timestamp seleccionado;
+- renombrar un hablante en toda la transcripción;
+- exportar una revisión nueva sin sobrescribir el original.
 
-Hay un flujo de GitHub Actions (`.github/workflows/desktop-build.yml`) que genera
-ejecutables independientes para Windows, macOS y Linux con PyInstaller. Ejecútalo
-desde la pestaña **Actions** del repositorio y descarga el artefacto de tu sistema.
+## 9. Formatos de entrada oficiales
 
-## Problemas frecuentes
+Audio: `.mp3 .wav .m4a .ogg .flac .aac .wma .opus .aif .aiff`.
 
-| Síntoma | Solución |
-|---|---|
-| `ModuleNotFoundError: No module named 'yt_dlp'` o `faster_whisper` | No abras `transcriptor_whisper.py` directamente. Cierra la ventana y ejecuta `run.bat` (Windows) o `python run.py`; el lanzador crea `.venv` e instala las dependencias correctas. |
-| "Python no se reconoce" (Windows) | Reinstala Python marcando **Add Python to PATH**. |
-| Error al crear `.venv` (Linux) | `sudo apt install python3-venv python3-tk` |
-| No abre la ventana (Linux) | Falta Tkinter: `sudo apt install python3-tk` |
-| "Falta el componente sounddevice/soundcard" al grabar | Acepta el aviso para instalarlo en el acto (se hace en segundo plano). En Linux instala además: `sudo apt install libportaudio2`. |
-| La barra **Nivel** no se mueve | Elige otra **Entrada**; comprueba que el dispositivo no esté silenciado y que tienes permisos de micrófono. |
-| No aparece "audio del sistema" en la lista (Windows) | Requiere Windows 10 build 2004+ (WASAPI). La entrada genérica aparece igual y ofrece instalar `soundcard` al usarla. |
-| No aparece "Monitor of …" en la lista (Linux) | Ejecuta `pactl load-module module-loopback` y reinicia la app. |
-| En macOS no hay opción de captura de sistema | Instala [BlackHole](https://existential.audio/blackhole/) y configúralo como salida de audio. |
-| No aparece mi micrófono en la lista | Conéctalo antes de abrir la app y reiníciala; revisa los permisos de micrófono del sistema. |
-| La primera transcripción tarda | Está descargando el modelo una sola vez; luego es rápido. |
+Video/contenedores: `.mp4 .webm .mkv .avi .mov .m4v .mpeg .mpg .3gp .ts .m2ts`.
+
+La extensión ya no basta: al agregar un archivo, VtT intenta abrirlo con PyAV y confirma que exista una pista de audio. Un contenedor soportado sin audio se rechaza antes de iniciar un trabajo largo.
+
+## 10. Grabación y audio del sistema
+
+Se conservan las funciones de la versión base:
+
+- micrófono/entrada mediante `sounddevice`;
+- audio del sistema en Windows mediante `soundcard`/WASAPI loopback;
+- monitores PulseAudio/PipeWire en Linux;
+- macOS requiere un dispositivo virtual como BlackHole para capturar lo que suena en el sistema.
+
+Las grabaciones se guardan en una carpeta persistente. Los temporales de YouTube no son el destino de la transcripción final.
+
+## 11. Carpetas y privacidad
+
+Los datos persistentes se guardan junto a la app cuando la carpeta es escribible; en ejecutables ubicados en carpetas protegidas se usa la carpeta de datos del usuario. Modelos, grabaciones y transcripciones no se versionan en Git.
+
+Internet se usa solo para: instalación/actualización de dependencias, primera descarga de modelos y descarga explícita desde YouTube. La inferencia de transcripción/diarización es local.
+
+## 12. Verificación
+
+La CI compila `transcriptor_whisper.py`, `vtt_core.py`, `vtt_diarization.py`, `vtt_enhanced.py` y `run.py`, y ejecuta `pytest` en Windows, macOS y Linux.
+
+Las pruebas automatizadas cubren, entre otros puntos:
+
+- tubería de grabación;
+- persistencia y exportación segura;
+- agrupación de segmentos;
+- cortes por hablante/pausa;
+- asignación temporal de hablantes;
+- métricas RTF;
+- JSON v2;
+- SRT con hablantes;
+- DOCX generado y reabierto;
+- pin SHA-256 local de modelos de diarización.
+
+Además debe realizarse una prueba manual en hardware real para medir velocidad, RAM, calidad de diarización y reproducción de revisión. Esa evidencia no puede reemplazarse por CI.
+
+## 13. Ejecutable independiente
+
+`.github/workflows/desktop-build.yml` construye ejecutables con PyInstaller para Windows, macOS y Linux e incluye las dependencias de Whisper, Word, diarización, audio y PyAV. La build no descarga los modelos de voz ni de hablantes: se obtienen cuando el usuario elige usarlos.
+
+## 14. Problemas frecuentes
+
+- **Python no se reconoce:** reinstala Python y habilita PATH o usa `py run.py` en Windows.
+- **Dependencia incompleta:** ejecuta `python run.py --update`.
+- **Primera transcripción lenta:** puede estar descargando el modelo Whisper.
+- **Primera diarización lenta:** descarga una vez los dos modelos de hablantes.
+- **GPU detectada pero falla:** VtT vuelve a CPU `int8`; no necesitas CUDA para usar la app.
+- **Un archivo se rechaza:** VtT no detectó una pista de audio decodificable; conviértelo a WAV/M4A/MP3 o a un contenedor soportado.
+- **Hablantes incorrectos:** prueba indicando el número real de participantes y revisa el resultado; superposición y ruido afectan la diarización.
