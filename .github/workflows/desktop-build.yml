@@ -1,7 +1,6 @@
 name: Desktop executables
 
 # Opcional: genera ejecutables independientes (no necesitan instalar Python).
-# Se ejecuta manualmente desde la pestaña Actions.
 on:
   workflow_dispatch:
 
