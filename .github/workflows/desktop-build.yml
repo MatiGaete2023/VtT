@@ -1,8 +1,15 @@
 name: Desktop executables
 
-# Opcional: genera ejecutables independientes (no necesitan instalar Python).
+# Genera ejecutables independientes (no necesitan instalar Python).
+# `push` sobre este mismo archivo se usa de forma transitoria para validar
+# el empaquetado desde el conector; el estado estable vuelve a workflow_dispatch.
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - "claude/voice-transcriber-multiplatform-6xifq1"
+    paths:
+      - ".github/workflows/desktop-build.yml"
 
 jobs:
   build:
