@@ -5,10 +5,11 @@ import multiprocessing as mp
 import tkinter as tk
 
 import vtt_app as ui
-from vtt_pipeline import PipelineV3Mixin
+from vtt_pipeline_v4 import PipelineV4Mixin
+from vtt_ui_v4 import DiarizacionV4UIMixin
 
 
-class VtTApp(PipelineV3Mixin, ui.VtTApp):
+class VtTApp(DiarizacionV4UIMixin, PipelineV4Mixin, ui.VtTApp):
     pass
 
 
