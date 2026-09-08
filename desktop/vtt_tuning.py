@@ -11,6 +11,10 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Mapping, Sequence, Tuple
 
+# Compatibilidad con la iteración anterior y sus integraciones/pruebas. El
+# pipeline Auto actual NO usa esta constante; parte en AUTO_BALANCED_THRESHOLD.
+AUTO_CLUSTER_THRESHOLD = 0.90
+
 AUTO_BALANCED_THRESHOLD = 0.74
 AUTO_SPLIT_THRESHOLD = 0.66
 AUTO_MERGE_THRESHOLD = 0.84
