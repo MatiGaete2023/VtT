@@ -1,22 +1,19 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Aislamiento de diarización en un proceso separado.
+"""Aislamiento de diarización en proceso separado.
 
-`sherpa-onnx` ejecuta la diarización en código nativo. Ejecutarlo en el mismo
-intérprete puede impedir que Tkinter atienda eventos mientras dura `process()`.
-Este módulo mantiene esa carga en un proceso hijo y deja al proceso de la UI
-responsivo.
+Además de mantener Tkinter responsivo, transmite regiones de voz y la estrategia
+Auto adaptativa al proceso hijo sin compartir objetos no serializables.
 """
 from __future__ import annotations
 
 import multiprocessing as mp
 import queue
-import time
 import traceback
 from pathlib import Path
-from typing import Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 
-import vtt_diarization as diar
+import vtt_diarization_adaptive as diar
 
 
 class DiarizacionCancelada(Exception):
@@ -24,7 +21,6 @@ class DiarizacionCancelada(Exception):
 
 
 def estimar_restante(porcentaje: float, transcurrido: float) -> Optional[float]:
-    """ETA simple en segundos usando el avance observado."""
     try:
         p = float(porcentaje)
         t = float(transcurrido)
@@ -41,19 +37,24 @@ def _worker_diarizacion(
     carpeta_modelos: str,
     num_speakers: int,
     threshold: float,
+    speech_regions: Optional[List[Tuple[float, float]]],
+    adaptive: bool,
     cola,
 ) -> None:
     """Punto de entrada del proceso hijo; solo usa datos serializables."""
     try:
-        turnos = diar.diarizar(
+        turnos, meta = diar.diarizar(
             ruta,
             Path(carpeta_modelos),
             num_speakers=num_speakers,
             threshold=threshold,
             log=lambda texto: cola.put(("log", str(texto))),
             progreso=lambda pct: cola.put(("progress", float(pct))),
+            speech_regions=speech_regions,
+            adaptive=bool(adaptive),
+            return_meta=True,
         )
-        cola.put(("result", turnos))
+        cola.put(("result", {"turns": turnos, "meta": meta}))
     except BaseException:
         cola.put(("error", traceback.format_exc()))
 
@@ -66,22 +67,29 @@ def diarizar_responsivo(
     log: Optional[Callable[[str], None]] = None,
     progreso: Optional[Callable[[float], None]] = None,
     cancelado: Optional[Callable[[], bool]] = None,
-) -> List[Dict]:
-    """Ejecuta diarización en un proceso independiente.
-
-    El hilo llamador permanece libre para vigilar cancelación y transmitir
-    progreso; el proceso principal de Tkinter no queda secuestrado por el
-    binding nativo de sherpa-onnx.
-    """
+    speech_regions: Optional[Sequence[Sequence[float]]] = None,
+    adaptive: bool = False,
+    return_meta: bool = False,
+) -> Union[List[Dict], Tuple[List[Dict], Dict[str, Any]]]:
+    """Ejecuta diarización en un proceso independiente y cancelable."""
     log = log or (lambda _: None)
     progreso = progreso or (lambda _: None)
     cancelado = cancelado or (lambda: False)
+
+    regiones_serializables: Optional[List[Tuple[float, float]]] = None
+    if speech_regions:
+        regiones_serializables = [
+            (float(r[0]), float(r[1])) for r in speech_regions if len(r) >= 2
+        ]
 
     ctx = mp.get_context("spawn")
     cola = ctx.Queue()
     proc = ctx.Process(
         target=_worker_diarizacion,
-        args=(str(ruta), str(carpeta_modelos), int(num_speakers), float(threshold), cola),
+        args=(
+            str(ruta), str(carpeta_modelos), int(num_speakers), float(threshold),
+            regiones_serializables, bool(adaptive), cola,
+        ),
         daemon=True,
     )
     proc.start()
@@ -108,7 +116,10 @@ def diarizar_responsivo(
             elif tipo == "progress":
                 progreso(float(valor))
             elif tipo == "result":
-                resultado = list(valor)
+                if isinstance(valor, dict):
+                    resultado = dict(valor)
+                else:
+                    resultado = {"turns": list(valor or []), "meta": {}}
             elif tipo == "error":
                 error = str(valor)
 
@@ -118,7 +129,9 @@ def diarizar_responsivo(
 
         if resultado is not None:
             progreso(100.0)
-            return resultado
+            turnos = list(resultado.get("turns") or [])
+            meta = dict(resultado.get("meta") or {})
+            return (turnos, meta) if return_meta else turnos
         if error is not None:
             raise RuntimeError("Falló la identificación de hablantes:\n" + error)
         if proc.exitcode not in (0, None):

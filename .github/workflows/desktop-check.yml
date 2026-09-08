@@ -40,7 +40,9 @@ jobs:
         run: >-
           python -m py_compile
           transcriptor_whisper.py vtt_core.py vtt_diarization.py
-          vtt_diarization_process.py vtt_tuning.py vtt_enhanced.py vtt_app.py run.py
+          vtt_diarization_adaptive.py vtt_diarization_process.py
+          vtt_enhanced.py vtt_app.py vtt_tuning.py vtt_reporting.py
+          vtt_pipeline.py vtt_main.py run.py
 
       - name: Instalar dependencias de pruebas
         run: python -m pip install --upgrade pip pytest python-docx

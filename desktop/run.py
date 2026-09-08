@@ -2,9 +2,9 @@
 # -*- coding: utf-8 -*-
 """Lanzador autoinstalable de VtT.
 
-Python 3.9+ es el minimo real exigido por faster-whisper actual. El lanzador
+Python 3.9+ es el mínimo real exigido por faster-whisper actual. El lanzador
 crea .venv, instala/actualiza requirements.txt cuando cambia su SHA-256 y abre
-la interfaz final sin perder la aplicacion base ni la capa mejorada previa.
+la interfaz final sin perder las capas de compatibilidad anteriores.
 """
 import os
 import sys
@@ -15,7 +15,7 @@ from pathlib import Path
 
 AQUI = Path(__file__).resolve().parent
 VENV_DIR = AQUI / ".venv"
-APP = AQUI / "vtt_app.py"
+APP = AQUI / "vtt_main.py"
 REQS = AQUI / "requirements.txt"
 MARKER = VENV_DIR / ".deps_ok"
 MODULOS_REQUERIDOS = (
