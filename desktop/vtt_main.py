@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Entry point final de escritorio VtT."""
+"""Entry point final de escritorio VtT V5.2-performance."""
 import multiprocessing as mp
 import tkinter as tk
 
 import vtt_app as ui
-from vtt_pipeline_v51 import PipelineV51Mixin
-from vtt_ui_v51 import DiarizacionV51UIMixin
+from vtt_pipeline_v52 import PipelineV52Mixin
+from vtt_ui_v52 import DiarizacionV52UIMixin
 
 
-class VtTApp(DiarizacionV51UIMixin, PipelineV51Mixin, ui.VtTApp):
+class VtTApp(DiarizacionV52UIMixin, PipelineV52Mixin, ui.VtTApp):
     pass
 
 
@@ -19,8 +19,7 @@ def main():
         root = TkinterDnD.Tk()
         dnd = True
     except Exception:
-        root = tk.Tk()
-        dnd = False
+        root = tk.Tk(); dnd = False
     VtTApp(root, dnd)
     root.mainloop()
 
