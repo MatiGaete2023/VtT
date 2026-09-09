@@ -9,7 +9,7 @@ import traceback
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
-import vtt_diarization_v52 as diar52
+import vtt_diarization_v52_metrics as diar52
 
 
 class DiarizacionCancelada(Exception):
