@@ -44,8 +44,7 @@ class DiarizationEngine(v5.DiarizationEngine):
         speech_regions: Optional[Sequence[Sequence[float]]] = None,
         adaptive: bool = False, diar_profile: str = "Equilibrada",
     ):
-        log = log or (lambda _: None)
-        progreso = progreso or (lambda _: None)
+        log = log or (lambda _: None); progreso = progreso or (lambda _: None)
         turnos, meta = super().diarize(
             ruta, num_speakers=num_speakers, threshold=threshold,
             log=log, progreso=progreso, speech_regions=speech_regions,
@@ -54,12 +53,22 @@ class DiarizationEngine(v5.DiarizationEngine):
         meta = dict(meta or {})
         if not turnos:
             meta["identity_verification"] = {"enabled": False, "reason": "sin_turnos"}
+            self._last_decoded_audio = None
             return turnos, meta
 
         t_all = time.perf_counter()
-        t_decode = time.perf_counter()
-        audio = legacy.decodificar_audio_mono(ruta, 16000)
-        identity_decode_seconds = time.perf_counter() - t_decode
+        cached = (
+            getattr(self, "_last_decoded_audio", None) is not None
+            and str(getattr(self, "_last_decoded_audio_path", "")) == str(ruta)
+            and int(getattr(self, "_last_decoded_audio_rate", 0) or 0) == 16000
+        )
+        if cached:
+            audio = self._last_decoded_audio
+            identity_decode_seconds = 0.0
+        else:
+            t_decode = time.perf_counter()
+            audio = legacy.decodificar_audio_mono(ruta, 16000)
+            identity_decode_seconds = time.perf_counter() - t_decode
         extractor, extractor_reused, extractor_init = self._ensure_identity_extractor()
 
         cache: Dict[tuple, object] = {}
@@ -71,12 +80,10 @@ class DiarizationEngine(v5.DiarizationEngine):
             a = max(0.0, float(a)); b = max(a, float(b))
             key = (round(a, 3), round(b, 3))
             if key in cache:
-                cache_hits += 1
-                return cache[key]
+                cache_hits += 1; return cache[key]
             ia, ib = max(0, int(a * 16000)), min(len(audio), int(b * 16000))
             if ib - ia < int(identity.MIN_EMBED_SECONDS * 16000):
-                cache[key] = None
-                return None
+                cache[key] = None; return None
             stream = extractor.create_stream()
             stream.accept_waveform(
                 sample_rate=16000,
@@ -84,13 +91,11 @@ class DiarizationEngine(v5.DiarizationEngine):
             )
             stream.input_finished()
             if not extractor.is_ready(stream):
-                cache[key] = None
-                return None
+                cache[key] = None; return None
             t0 = time.perf_counter()
             value = identity.normalizar(extractor.compute(stream))
             compute_seconds += time.perf_counter() - t0
-            embed_calls += 1
-            cache[key] = value
+            embed_calls += 1; cache[key] = value
             return value
 
         emb0, extract0 = identity.extraer_embeddings_turnos(turnos, embed_interval)
@@ -130,9 +135,9 @@ class DiarizationEngine(v5.DiarizationEngine):
             "extractor_reused": bool(extractor_reused),
             "extractor_init_seconds": float(extractor_init),
             "audio_decode_seconds": float(identity_decode_seconds),
+            "audio_reused_from_diarization": bool(cached),
             "embedding_compute_seconds": float(compute_seconds),
-            "embedding_calls": int(embed_calls),
-            "embedding_cache_hits": int(cache_hits),
+            "embedding_calls": int(embed_calls), "embedding_cache_hits": int(cache_hits),
             "initial_extraction": extract0, "final_extraction": extract_final,
             "refinement": refine_meta, "local_scan": scan_meta,
             "consistency": consistency, "wall_seconds": float(identity_wall),
@@ -149,4 +154,9 @@ class DiarizationEngine(v5.DiarizationEngine):
             f"consistencia {consistency.get('overall_confidence', 'sin_datos')} · "
             f"{int(scan_meta.get('applied_changes', 0) or 0)} cambio(s) local(es)."
         )
+        # El PCM se conserva solo durante el job; el worker persistente no debe
+        # retener audios completos entre archivos.
+        self._last_decoded_audio = None
+        self._last_decoded_audio_path = None
+        self._last_decoded_audio_rate = None
         return scanned, meta
