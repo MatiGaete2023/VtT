@@ -11,10 +11,12 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
+    permissions:
+      contents: write
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -74,17 +76,14 @@ jobs:
 
   build-release:
     name: Build signed release APK (opcional)
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     if: github.event_name != 'pull_request'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Gatea el resto de los pasos por salida de step (no por 'secrets' en un
-      # 'if:' de job), para evitar cualquier ambiguedad: si el repositorio no
-      # tiene configurado el keystore, los pasos siguientes se saltan solos y
-      # el job igual termina en verde (no roto, solo sin producir un release
-      # firmado). Ver android/README.md -> "Firmar un APK de release".
       - name: Verificar si hay keystore configurado
         id: check
         env:
@@ -94,7 +93,7 @@ jobs:
             echo "tiene_keystore=true" >> "$GITHUB_OUTPUT"
           else
             echo "tiene_keystore=false" >> "$GITHUB_OUTPUT"
-            echo "No hay keystore configurado (secrets.ANDROID_KEYSTORE_B64 vacío); se omite el release firmado."
+            echo "No hay keystore configurado; se omite el release firmado."
           fi
 
       - name: Set up JDK 17
@@ -164,3 +163,7 @@ jobs:
             android/app/build/outputs/apk/release/app-release.apk
             android/app/build/outputs/apk/release/app-release.apk.sha256
           if-no-files-found: error
+
+      - name: Limpiar material de firma del runner
+        if: always() && steps.check.outputs.tiene_keystore == 'true'
+        run: rm -f android/release.jks android/keystore.properties
