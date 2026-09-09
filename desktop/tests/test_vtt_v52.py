@@ -3,6 +3,7 @@ from pathlib import Path
 import numpy as np
 
 import vtt_diarization_v52 as diar52
+import vtt_diarization_v52_metrics as metrics52
 import vtt_identity_v52 as identity52
 import vtt_performance as performance
 import vtt_reporting_v52 as reporting52
@@ -119,6 +120,44 @@ def test_precheck_can_avoid_second_pass_after_acoustic_consolidation():
     assert out["accepted"] is True
     assert out["meta"]["speakers_before"] == 9
     assert out["meta"]["speakers_after"] == 7
+
+
+def test_identity_wall_total_clamps_negative_partial_values():
+    assert metrics52.identity_wall_total(3.0, 2.5) == 5.5
+    assert metrics52.identity_wall_total(-1.0, 2.5) == 2.5
+    assert metrics52.identity_wall_total(3.0, -2.0) == 3.0
+
+
+def test_identity_wall_metrics_include_every_light_identity_call(monkeypatch):
+    calls = {"light": 0}
+
+    def fake_light_identity(self, _turns, _context, *, max_total=18):
+        calls["light"] += 1
+        return {"wall_seconds": 1.25, "max_total": max_total}
+
+    def fake_diarize(self, *args, **kwargs):
+        self._light_identity([], {})
+        self._light_identity([], {})
+        return [], {
+            "identity_verification": {
+                "enabled": True,
+                "wall_seconds": 3.0,
+            },
+            "identity_wall_seconds": 3.0,
+        }
+
+    monkeypatch.setattr(diar52.DiarizationEngine, "_light_identity", fake_light_identity)
+    monkeypatch.setattr(diar52.DiarizationEngine, "diarize", fake_diarize)
+
+    engine = metrics52.DiarizationEngine(Path("."))
+    _turns, meta = engine.diarize("dummy.wav")
+    verification = meta["identity_verification"]
+
+    assert calls["light"] == 2
+    assert verification["final_stage_wall_seconds"] == 3.0
+    assert verification["light_identity_wall_seconds"] == 2.5
+    assert verification["total_wall_seconds"] == 5.5
+    assert meta["identity_wall_seconds"] == 5.5
 
 
 def test_validation_keeps_acoustic_and_text_counts_separate():
