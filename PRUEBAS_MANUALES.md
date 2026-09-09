@@ -1,6 +1,6 @@
 # Pruebas manuales obligatorias — VtT
 
-Este archivo registra pruebas que la CI no puede sustituir. Cada ejecución manual debe anotar: fecha, commit/artefacto, equipo, SO, configuración, resultado y evidencia no sensible.
+Este archivo registra pruebas que la CI no puede sustituir y, separadamente, campañas acústicas reproducibles que sí pueden automatizarse. Cada ejecución manual debe anotar: fecha, commit/artefacto, equipo, SO, configuración, resultado y evidencia no sensible.
 
 Estados permitidos: `PENDIENTE`, `OK`, `FALLA`, `NO_APLICA`.
 
@@ -10,7 +10,7 @@ Estados permitidos: `PENDIENTE`, `OK`, `FALLA`, `NO_APLICA`.
 
 - [ ] Ejecutar `run.bat` en una ruta con espacios, paréntesis y tildes.
 - [ ] Probar Python 3.9+ sin privilegios de administrador.
-- [ ] Con `.venv` antigua, modificar/actualizar `requirements.txt` y comprobar que `run.py` detecta el hash distinto e instala dependencias.
+- [ ] Con `.venv` antigua, cambiar `requirements.txt` y comprobar que `run.py` detecta el hash distinto e instala dependencias.
 - [ ] `python run.py --repair` reconstruye dependencias sin tocar transcripciones del usuario.
 - [ ] La ventana principal cabe en la pantalla; puede redimensionarse y el área de texto/registro puede agrandarse o reducirse.
 
@@ -73,9 +73,9 @@ Para un mismo audio corto, registrar:
 
 No comparar velocidad entre PCs distintos como si fuera efecto exclusivo del perfil.
 
-## 5. Diarización y V5.1
+## 5. Diarización y V5.1 en hardware real
 
-Prueba mínima con un audio de varios hablantes cuyo contenido pueda escucharse manualmente.
+Prueba con un audio de varios hablantes cuyo contenido pueda escucharse manualmente.
 
 Configuración recomendada de referencia:
 
@@ -107,7 +107,7 @@ Comprobar manualmente:
 - [ ] Auto con baja confianza se presenta como estimación, no como certeza;
 - [ ] fijar manualmente N mantiene el conteo solicitado y V5.1 no inventa nuevas identidades.
 
-## 6. Reutilización/rendimiento
+## 6. Reutilización/rendimiento en equipo real
 
 Sin cerrar VtT:
 
@@ -118,22 +118,30 @@ Sin cerrar VtT:
 - [ ] Registrar diferencia de preparación/inicialización.
 - [ ] Cambiar el perfil de diarización y comprobar que el motor se reinicializa cuando cambia `window_shift_ratio`.
 
-## 7. Smoke acústico reproducible del proyecto
+## 7. Smoke acústico reproducible del proyecto — OK 09-09-2026
 
-Estos audios oficiales se usan como smoke automatizado porque tienen número conocido de hablantes:
+Audios oficiales utilizados:
 
-- `1-two-speakers-en.wav` → 2;
-- `0-four-speakers-zh.wav` → 4.
+- `1-two-speakers-en.wav` → ground truth de conteo: 2;
+- `0-four-speakers-zh.wav` → ground truth de conteo: 4.
 
-El smoke V5.1 debe verificar:
+Campaña V5.1:
 
-- [ ] conteo 2/4;
-- [ ] `identity_verification.enabled=true`;
-- [ ] resultado no vacío;
-- [ ] segunda tarea reutiliza el motor compatible;
-- [ ] la capa de identidad no destruye el conteo correcto.
+- [x] 2 hablantes → 2 detectados.
+- [x] 4 hablantes → 4 detectados.
+- [x] `identity_verification.enabled=true`.
+- [x] resultado no vacío.
+- [x] segunda tarea reutiliza modelos/motor/extractor compatibles.
+- [x] la capa de identidad no modifica los conteos correctos.
 
-Esto **no sustituye** un benchmark de diarización con ground truth temporal completo.
+Resultado observado en el runner:
+
+```text
+2 voces: 1 pasada · identidad media · sherpa wall ~0,81 s
+4 voces: 1 pasada · identidad alta · sherpa wall ~4,62 s
+```
+
+El workflow temporal usado para esta campaña se eliminó después de terminar. Esto valida un smoke de conteo y reutilización; **no sustituye** un benchmark de diarización con ground truth temporal completo ni las pruebas de hardware real de las secciones anteriores.
 
 ## 8. Android físico ARM64
 
@@ -152,13 +160,26 @@ Esto **no sustituye** un benchmark de diarización con ground truth temporal com
 
 ## 9. APK/release
 
-- [ ] APK debug del workflow `Android APK` se instala y abre.
+- [x] APK debug del workflow `Android APK #19` compila y se publica como artefacto.
+- [ ] Instalar ese APK en un teléfono físico y confirmar apertura/flujo completo.
 - [ ] Si hay secrets de firma, `assembleRelease` produce APK firmado y `.sha256`.
 - [ ] Ejecutar la prueba de actualización descrita en `android/RELEASE_SETUP.md` antes de distribuir un release como actualización de otro.
 
-## 10. Registro de resultados
+## 10. Empaquetado de escritorio — OK 09-09-2026
 
-No marcar este documento globalmente como “ejecutado” por una sola prueba. Añadir debajo una entrada por campaña:
+`Desktop executables #6`:
+
+- [x] Windows PyInstaller.
+- [x] Ubuntu PyInstaller.
+- [x] macOS PyInstaller.
+- [x] artefactos subidos en los tres sistemas.
+- [x] workflow de build restaurado a modo manual después de la prueba.
+
+El build exitoso no reemplaza la prueba de apertura/uso en hardware real.
+
+## 11. Registro de campañas manuales
+
+No marcar las secciones de hardware como ejecutadas por una prueba CI. Añadir una entrada por campaña:
 
 ```text
 Fecha:
