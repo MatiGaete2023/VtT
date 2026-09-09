@@ -1,185 +1,209 @@
-# Pruebas manuales obligatorias — VtT
+# Pruebas manuales obligatorias — VtT V5.2
 
-Este archivo registra pruebas que la CI no puede sustituir y, separadamente, campañas acústicas reproducibles que sí pueden automatizarse. Cada ejecución manual debe anotar: fecha, commit/artefacto, equipo, SO, configuración, resultado y evidencia no sensible.
+Este archivo registra lo que CI no puede sustituir y, separadamente, campañas reproducibles ya ejecutadas. Cada prueba manual debe anotar fecha, commit/artefacto, equipo, SO, configuración, resultado y evidencia no sensible.
 
-Estados permitidos: `PENDIENTE`, `OK`, `FALLA`, `NO_APLICA`.
+Estados: `PENDIENTE`, `OK`, `FALLA`, `NO_APLICA`.
 
 ## 1. Escritorio — instalación y arranque
 
 ### Windows
 
-- [ ] Ejecutar `run.bat` en una ruta con espacios, paréntesis y tildes.
-- [ ] Probar Python 3.9+ sin privilegios de administrador.
-- [ ] Con `.venv` antigua, cambiar `requirements.txt` y comprobar que `run.py` detecta el hash distinto e instala dependencias.
-- [ ] `python run.py --repair` reconstruye dependencias sin tocar transcripciones del usuario.
-- [ ] La ventana principal cabe en la pantalla; puede redimensionarse y el área de texto/registro puede agrandarse o reducirse.
+- [ ] `run.bat` en ruta con espacios, paréntesis y tildes.
+- [ ] Python 3.9+ sin privilegios de administrador.
+- [ ] `.venv` antigua + cambio de `requirements.txt`: detectar hash distinto e instalar.
+- [ ] `python run.py --repair` repara dependencias sin tocar transcripciones.
+- [ ] ventana principal visible/redimensionable en la pantalla objetivo.
+- [ ] migración V5.1→V5.2: una combinación no estándar se conserva como **Personalizado** sin cambiar modelo/perfiles.
 
 ### macOS/Linux
 
-- [ ] Arranque mediante `run.sh`/`python3 run.py`.
-- [ ] En Linux, confirmar mensaje claro si faltan Tk/PortAudio.
-- [ ] En macOS, confirmar que transcripción de archivo funciona sin BlackHole y que loopback solo se ofrece/documenta cuando existe dispositivo virtual.
+- [ ] arranque `run.sh`/`python3 run.py`.
+- [ ] Linux: mensaje claro si faltan Tk/PortAudio.
+- [ ] macOS: archivos normales sin BlackHole; loopback solo con dispositivo virtual.
 
-## 2. Escritorio — entrada de archivos y salidas
+## 2. Archivos y salidas
 
-- [ ] Audio MP3/WAV/M4A/OGG/FLAC.
-- [ ] Video MP4/WEBM/MKV/MOV con audio.
-- [ ] Contenedor soportado sin pista de audio: debe rechazarse antes de transcribir.
-- [ ] Archivo dañado + archivo válido en el mismo lote: informar éxito parcial y continuar.
-- [ ] Repetir una transcripción existente: crear `nombre (2)` y no sobrescribir el original.
-- [ ] Cancelar cuando ya existen segmentos: guardar salida parcial claramente identificada.
-- [ ] Descarga YouTube: las salidas finales no deben quedar dentro del temporal que se elimina al cerrar.
+- [ ] MP3/WAV/M4A/OGG/FLAC.
+- [ ] MP4/WEBM/MKV/MOV con audio.
+- [ ] contenedor sin pista de audio rechazado antes de transcribir.
+- [ ] archivo dañado + válido en mismo lote: éxito parcial y continuación.
+- [ ] salida existente: `nombre (2)`, sin sobrescribir.
+- [ ] cancelación con segmentos: salida parcial identificada.
+- [ ] YouTube: salida final fuera del temporal eliminado al cerrar.
 
 ## 3. Grabación
 
 ### Micrófono
 
-- [ ] Iniciar/detener dos grabaciones dentro del mismo segundo: ambos WAV deben existir y ser distintos.
-- [ ] El medidor de nivel se mueve.
-- [ ] Desconectar/cambiar el dispositivo durante la grabación: debe aparecer error/aviso, no una UI eternamente en “Grabando”.
-- [ ] Detener con disco lento o cola pendiente: el WAV solo se anuncia como listo cuando el writer terminó.
+- [ ] dos grabaciones dentro del mismo segundo producen WAV distintos.
+- [ ] medidor de nivel funciona.
+- [ ] desconexión/cambio de dispositivo muestra error y no deja UI atrapada.
+- [ ] disco lento/cola pendiente: WAV solo listo tras finalizar writer.
 
 ### Audio del sistema
 
 Windows:
 
-- [ ] Seleccionar una entrada de loopback de `soundcard`.
-- [ ] Reproducir audio en navegador/app y confirmar que el medidor se mueve.
-- [ ] El WAV resultante contiene el audio reproducido y no solo estática/silencio.
-- [ ] Deshabilitar o desconectar el dispositivo durante la captura: conservar parcial y mostrar error.
+- [ ] loopback `soundcard` disponible.
+- [ ] medidor responde al audio reproducido.
+- [ ] WAV contiene el audio real.
+- [ ] desconectar dispositivo conserva parcial y muestra error.
 
 Linux/macOS:
 
-- [ ] Probar monitor PulseAudio/PipeWire si existe.
-- [ ] En macOS, probar BlackHole u otro dispositivo virtual cuando corresponda.
+- [ ] monitor PulseAudio/PipeWire cuando exista.
+- [ ] BlackHole u otro dispositivo virtual en macOS cuando corresponda.
 
-## 4. ASR
+## 4. ASR y modos globales
 
-Para un mismo audio corto, registrar:
+Sobre el mismo audio registrar modelo, modo global, Perfil ASR, backend, Batch, Beam, carga, ASR seconds y procesamiento total.
 
-- modelo;
-- Perfil ASR;
-- backend;
-- Batch;
-- Beam;
-- carga de modelo;
-- ASR seconds;
-- procesamiento total.
+- [ ] modo Rápido.
+- [ ] modo Equilibrado.
+- [ ] modo Preciso.
+- [ ] Personalizado conserva los controles elegidos.
+- [ ] GPU automática con CUDA compatible, si existe; confirmar fallback CPU.
 
-- [ ] Rápido.
-- [ ] Equilibrado.
-- [ ] Preciso.
-- [ ] GPU automática en un equipo con CUDA compatible, si existe; confirmar fallback CPU si el backend falla.
+No atribuir diferencias entre PCs distintos al perfil.
 
-No comparar velocidad entre PCs distintos como si fuera efecto exclusivo del perfil.
+## 5. Diarización V5.2 en audio escuchable
 
-## 5. Diarización y V5.1 en hardware real
+Referencia recomendada:
 
-Prueba con un audio de varios hablantes cuyo contenido pueda escucharse manualmente.
-
-Configuración recomendada de referencia:
-
-- ASR: Equilibrado o Preciso según objetivo;
-- hablantes: Auto;
-- diarización: Equilibrada;
-- Word/JSON: activos para diagnóstico.
+- modo global Equilibrado o Personalizado;
+- hablantes Auto;
+- diarización Equilibrada;
+- Word/JSON activos.
 
 Registrar:
 
-- estimación Auto y confianza;
+- clusters sherpa seleccionados;
+- clusters tras identidad;
+- hablantes con texto y clusters sin texto;
 - perfil/Window shift;
-- pasadas Auto y motivo;
-- tiempo de diarización;
-- wall pasada 1 y pasada 2;
-- worker job/modelos/motor reutilizado;
-- segmentos divididos y cambios internos;
-- control identidad V5.1;
-- embeddings calculados;
-- turnos reasignados;
-- cambios locales;
+- pasadas Auto;
+- precheck, tiempo y si evitó segunda pasada;
+- selección identity-aware si se utilizó;
+- wall por pasada;
+- tiempo total de diarización;
+- reutilización de worker/modelos/motor/PCM;
+- embeddings y caché;
+- sonda/detalle de turnos largos;
+- reasignaciones;
 - consistencia global y por Persona.
 
-Comprobar manualmente:
+Comprobar:
 
-- [ ] una misma `Persona N` no representa de forma evidente dos voces diferentes;
-- [ ] intervenciones cortas reales no desaparecen solo por su duración;
-- [ ] cambios claros de voz dentro de un segmento largo producen cortes razonables;
-- [ ] Auto con baja confianza se presenta como estimación, no como certeza;
-- [ ] fijar manualmente N mantiene el conteo solicitado y V5.1 no inventa nuevas identidades.
+- [ ] una misma `Persona N` no representa evidentemente dos voces diferentes;
+- [ ] intervenciones breves reales no desaparecen solo por duración;
+- [ ] cambio sostenido dentro de un turno largo produce corte razonable cuando corresponde;
+- [ ] Auto ambiguo/reservado se presenta como estimación;
+- [ ] manual N respeta el conteo solicitado;
+- [ ] un cluster acústico sin palabras aparece como tal y no desaparece del reporte;
+- [ ] si el precheck evita segunda pasada, la reducción de tiempo no introduce una fusión audible incorrecta.
 
-## 6. Reutilización/rendimiento en equipo real
+## 6. Reutilización/rendimiento
 
 Sin cerrar VtT:
 
 1. transcribir un archivo con diarización;
 2. transcribir otro con el mismo perfil.
 
-- [ ] El segundo trabajo indica reutilización de modelos/motor cuando corresponde.
-- [ ] Registrar diferencia de preparación/inicialización.
-- [ ] Cambiar el perfil de diarización y comprobar que el motor se reinicializa cuando cambia `window_shift_ratio`.
+- [ ] segundo trabajo indica reutilización de modelos/motor.
+- [ ] registrar preparación/inicialización.
+- [ ] cambiar perfil de diarización y comprobar reinicialización al cambiar `window_shift_ratio`.
+- [ ] comparar `processing_seconds` con duración; tratar real-time como objetivo medido, no garantía.
 
-## 7. Smoke acústico reproducible del proyecto — OK 09-09-2026
+## 7. Smoke acústico reproducible V5.2 — OK 09-09-2026
 
-Audios oficiales utilizados:
+Audios oficiales:
 
-- `1-two-speakers-en.wav` → ground truth de conteo: 2;
-- `0-four-speakers-zh.wav` → ground truth de conteo: 4.
+- `1-two-speakers-en.wav` → 2;
+- `0-four-speakers-zh.wav` → 4.
 
-Campaña V5.1:
+Campaña V5.2, repetida durante el cierre:
 
-- [x] 2 hablantes → 2 detectados.
-- [x] 4 hablantes → 4 detectados.
-- [x] `identity_verification.enabled=true`.
-- [x] resultado no vacío.
-- [x] segunda tarea reutiliza modelos/motor/extractor compatibles.
-- [x] la capa de identidad no modifica los conteos correctos.
+- [x] 2 → 2.
+- [x] 4 → 4.
+- [x] una pasada en ambos casos.
+- [x] verificación de identidad habilitada.
+- [x] PCM reutilizado desde diarización para identidad.
+- [x] segundo trabajo reutiliza modelos/motor/extractor.
+- [x] la capa V5.2 no altera conteos correctos.
+- [x] workflow temporal eliminado al terminar.
 
-Resultado observado en el runner:
+Esto valida conteo/reutilización en dos muestras conocidas; no es DER/JER.
+
+## 8. Benchmark ASR reproducible — OK 09-09-2026
+
+`benchmark_asr.py` se ejecutó sobre el `jfk.flac` público de OpenAI con timestamps por palabra:
 
 ```text
-2 voces: 1 pasada · identidad media · sherpa wall ~0,81 s
-4 voces: 1 pasada · identidad alta · sherpa wall ~4,62 s
+medium / Preciso      ~5.9 s · ~1.87x
+medium / Equilibrado  ~4.6 s · ~2.38x
+small  / Preciso      ~3.2 s · ~3.47x
+small  / Equilibrado  ~1.5 s · ~7.45x
 ```
 
-El workflow temporal usado para esta campaña se eliminó después de terminar. Esto valida un smoke de conteo y reutilización; **no sustituye** un benchmark de diarización con ground truth temporal completo ni las pruebas de hardware real de las secciones anteriores.
+- [x] las cuatro combinaciones ejecutan.
+- [x] JSON/CSV del benchmark generados en la campaña temporal.
+- [x] similitud textual 1.000 contra medium/Preciso en esa muestra.
 
-## 8. Android físico ARM64
+No usar estos números como estimación del audio chileno del usuario ni de otro hardware.
 
-- [ ] Primera descarga de `tiny/base`; cortar red a mitad y confirmar reanudación.
-- [ ] Tras descargar, activar modo avión y transcribir un audio local.
-- [ ] Rotar la pantalla durante transcripción: el trabajo continúa.
-- [ ] Enviar la app al fondo y volver.
-- [ ] Cancelar durante descarga, decodificación y transcripción.
-- [ ] Compartir audio desde otra app mediante ACTION_SEND.
-- [ ] Abrir audio/video mediante ACTION_VIEW.
-- [ ] Editar texto y guardar TXT.
-- [ ] Guardar SRT sin edición global; con edición, comprobar advertencia de que SRT conserva segmentos originales.
-- [ ] Reiniciar el proceso y comprobar restauración del último documento.
-- [ ] Probar audio de 10, 60 y >90 minutos y registrar memoria, tiempo, batería y temperatura.
-- [ ] Si un audio largo provoca OOM, debe mostrarse mensaje accionable en vez de un crash sin explicación.
+## 9. Android físico ARM64
 
-## 9. APK/release
+### Modelos/offline
 
-- [x] APK debug del workflow `Android APK #19` compila y se publica como artefacto.
-- [ ] Instalar ese APK en un teléfono físico y confirmar apertura/flujo completo.
-- [ ] Si hay secrets de firma, `assembleRelease` produce APK firmado y `.sha256`.
-- [ ] Ejecutar la prueba de actualización descrita en `android/RELEASE_SETUP.md` antes de distribuir un release como actualización de otro.
+- [ ] primera descarga tiny/base; cortar red y confirmar reanudación.
+- [ ] alterar/truncar un modelo local y comprobar que se rechaza y reacquire.
+- [ ] modo avión después de modelo válido y transcribir archivo local.
 
-## 10. Empaquetado de escritorio — OK 09-09-2026
+### Ciclo de vida
 
-`Desktop executables #6`:
+- [ ] rotar durante transcripción.
+- [ ] enviar app al fondo y volver.
+- [ ] cancelar durante descarga, decodificación y transcripción.
+- [ ] ACTION_SEND.
+- [ ] ACTION_VIEW.
+- [ ] editar texto, TXT y SRT.
+- [ ] reiniciar proceso y restaurar último documento.
 
-- [x] Windows PyInstaller.
-- [x] Ubuntu PyInstaller.
-- [x] macOS PyInstaller.
-- [x] artefactos subidos en los tres sistemas.
-- [x] workflow de build restaurado a modo manual después de la prueba.
+### Audio por bloques
 
-El build exitoso no reemplaza la prueba de apertura/uso en hardware real.
+Probar al menos 10, 60 y >90 minutos:
 
-## 11. Registro de campañas manuales
+- [ ] no existe OOM por materializar el audio completo.
+- [ ] timestamps globales permanecen crecientes.
+- [ ] no se observa duplicación evidente en las uniones cada ~88 s.
+- [ ] no se pierde una frase completa en el empalme.
+- [ ] cancelar en un bloque intermedio detiene el proceso.
+- [ ] registrar pico aproximado de memoria.
+- [ ] registrar batería y temperatura.
 
-No marcar las secciones de hardware como ejecutadas por una prueba CI. Añadir una entrada por campaña:
+La CI solo verifica que la implementación compile; estas condiciones requieren dispositivo/audio real.
+
+## 10. APK/release
+
+- [x] implementación Android de hashes/JNI/bloques compila en CI.
+- [ ] instalar el APK final en teléfono físico y completar flujo.
+- [ ] con secrets de firma, `assembleRelease` produce APK firmado y `.sha256`.
+- [ ] ejecutar prueba de actualización de `android/RELEASE_SETUP.md` antes de distribuir como actualización.
+
+## 11. Empaquetado de escritorio
+
+La versión V5.1 tuvo PyInstaller verde en los tres sistemas. Para V5.2:
+
+- [ ] Windows PyInstaller final.
+- [ ] Ubuntu PyInstaller final.
+- [ ] macOS PyInstaller final.
+- [ ] artefactos presentes.
+- [ ] workflow vuelve a `workflow_dispatch` sin trigger temporal.
+- [ ] abrir/usar ejecutable en hardware real (independiente del build CI).
+
+## 12. Registro de campañas manuales
+
+No marcar hardware como ejecutado por CI.
 
 ```text
 Fecha:
