@@ -46,6 +46,11 @@ jobs:
           test "$(stat -c%s /tmp/seg.tar.bz2)" = "6958444"
           test "$(stat -c%s /tmp/emb.onnx)" = "39593761"
           sha256sum /tmp/seg.tar.bz2 /tmp/emb.onnx | tee /tmp/model-hashes.txt
+          mkdir -p /tmp/seg-extract
+          tar -xjf /tmp/seg.tar.bz2 -C /tmp/seg-extract
+          SEG_MODEL="$(find /tmp/seg-extract -type f -name model.onnx -print -quit)"
+          test -n "$SEG_MODEL"
+          sha256sum "$SEG_MODEL" | tee -a /tmp/model-hashes.txt
       - name: Smoke V5.2 con ground truth 2 y 4
         working-directory: desktop
         run: |
