@@ -1,0 +1,116 @@
+name: V5.2 validation temporal
+
+on:
+  push:
+    branches:
+      - "claude/voice-transcriber-multiplatform-6xifq1"
+    paths:
+      - ".github/workflows/vtt-v52-validation.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  acoustic:
+    name: Smoke acústico V5.2 + hashes modelos
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.11"
+      - name: Install backend dependencies
+        working-directory: desktop
+        run: |
+          python -m pip install --upgrade pip
+          pip install sherpa-onnx av numpy
+      - name: Obtener audios oficiales y hashes de assets
+        run: |
+          set -euo pipefail
+          curl -L --fail --retry 3 \
+            https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-segmentation-models/1-two-speakers-en.wav \
+            -o /tmp/1-two-speakers-en.wav
+          curl -L --fail --retry 3 \
+            https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-segmentation-models/0-four-speakers-zh.wav \
+            -o /tmp/0-four-speakers-zh.wav
+          curl -L --fail --retry 3 \
+            https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-segmentation-models/sherpa-onnx-pyannote-segmentation-3-0.tar.bz2 \
+            -o /tmp/seg.tar.bz2
+          curl -L --fail --retry 3 \
+            https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx \
+            -o /tmp/emb.onnx
+          test "$(stat -c%s /tmp/seg.tar.bz2)" = "6958444"
+          test "$(stat -c%s /tmp/emb.onnx)" = "39593761"
+          sha256sum /tmp/seg.tar.bz2 /tmp/emb.onnx | tee /tmp/model-hashes.txt
+      - name: Smoke V5.2 con ground truth 2 y 4
+        working-directory: desktop
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from vtt_diarization_v52 import DiarizationEngine
+
+          engine = DiarizationEngine(Path('/tmp/vtt-models'))
+          cases = [
+              ('/tmp/1-two-speakers-en.wav', 2),
+              ('/tmp/0-four-speakers-zh.wav', 4),
+          ]
+          for i, (path, expected) in enumerate(cases):
+              turns, meta = engine.diarize(
+                  path, num_speakers=-1, adaptive=True,
+                  diar_profile='Equilibrada', log=print,
+              )
+              got = int(meta.get('detected_speakers', 0))
+              raw = int(meta.get('raw_sherpa_selected_speakers', 0))
+              print('CASE', i, 'expected=', expected, 'raw=', raw, 'final=', got,
+                    'passes=', meta.get('passes'), 'retry_avoided=', meta.get('retry_avoided'),
+                    'identity=', (meta.get('identity_consistency') or {}).get('overall_confidence'))
+              assert got == expected, (path, expected, got, meta)
+              assert raw >= 1
+              iv = meta.get('identity_verification') or {}
+              assert iv.get('audio_reused_from_diarization') is True
+              if i == 1:
+                  assert meta.get('models_reused') is True
+                  assert meta.get('engine_reused') is True
+                  assert iv.get('extractor_reused') is True
+          PY
+      - name: Upload hash record
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: v52-model-hashes
+          path: /tmp/model-hashes.txt
+
+  asr-benchmark:
+    name: Benchmark ASR 4 perfiles (muestra pública)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.11"
+      - name: Install faster-whisper
+        run: |
+          python -m pip install --upgrade pip
+          pip install faster-whisper
+      - name: Download public Whisper sample
+        run: |
+          curl -L --fail --retry 3 \
+            https://raw.githubusercontent.com/openai/whisper/main/tests/jfk.flac \
+            -o /tmp/jfk.flac
+          test -s /tmp/jfk.flac
+      - name: Run four-profile benchmark
+        working-directory: desktop
+        run: python benchmark_asr.py /tmp/jfk.flac --language en --output /tmp/v52-asr.json
+      - name: Upload benchmark
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: v52-asr-benchmark-public-sample
+          path: |
+            /tmp/v52-asr.json
+            /tmp/v52-asr.csv
