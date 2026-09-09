@@ -1,7 +1,7 @@
 # Transcriptor VtT — versión Android (APK nativo, 100 % offline)
 
 App Android que transcribe audio a texto **en el propio teléfono**, sin enviar nada
-a internet. Usa [whisper.cpp](https://github.com/ggerganov/whisper.cpp) compilado de
+a internet. Usa [whisper.cpp](https://github.com/ggml-org/whisper.cpp) compilado de
 forma nativa. El modelo de voz se descarga **una sola vez** la primera vez que lo usas
 y luego funciona sin conexión.
 
@@ -64,7 +64,10 @@ contenido de trabajo termine en un respaldo no elegido.
 3. `Run` ▶ con el teléfono conectado, o `Build > Build APK(s)`.
 
 La primera compilación descarga whisper.cpp (vía CMake `FetchContent`) y compila la
-parte nativa; puede tardar varios minutos.
+parte nativa; puede tardar varios minutos. El código nativo está fijado al commit
+`8a9ad7844d6e2a10cddf4b92de4089d7ac2b14a9`, que corresponde al tag oficial
+`v1.7.4` verificado el 9 de septiembre de 2026. Actualizar whisper.cpp requiere cambiar
+ese SHA explícitamente y volver a ejecutar la CI Android.
 
 ## Firmar un APK de release (opcional)
 
@@ -90,12 +93,12 @@ esto es solo para publicar un APK de **release** firmado con tu propia clave.
    | `ANDROID_KEY_ALIAS` | el alias (`vtt` en el ejemplo) |
    | `ANDROID_KEY_PASSWORD` | la clave de la llave (`-keypass`) |
 
-3. Listo: el job **"Build signed release APK (opcional)"** del workflow "Android APK"
-   se activa solo cuando esos secrets existen (si no, se omite sin romper nada) y
-   sube el artefacto `TranscriptorVtT-release-apk`.
+3. El job **"Build signed release APK (opcional)"** del workflow "Android APK"
+   se activa solo cuando esos secrets existen y sube el artefacto
+   `TranscriptorVtT-release-apk`.
 
-Para compilar el release firmado en tu equipo en vez de en CI, crea
-`android/keystore.properties` (no se versiona) con:
+Para compilar el release firmado en tu equipo, crea `android/keystore.properties`
+(no se versiona) con:
 
 ```properties
 storeFile=release.jks
@@ -105,25 +108,27 @@ keyPassword=TU_CLAVE_DE_LLAVE
 ```
 
 y ejecuta `./gradlew assembleRelease` en `android/`. Sin ese archivo, `assembleRelease`
-igual compila (sin firmar), así que nadie sin la clave se queda sin poder construir
-el proyecto.
+compila sin firma personalizada.
 
 ## Detalles técnicos
 
-- Núcleo nativo: `whisper.cpp` (tag `v1.7.4`), compilado con el NDK para `arm64-v8a`.
-- Puente JNI: `app/src/main/cpp/whisper_jni.cpp` ↔ `WhisperBridge.kt`. Reporta
-  progreso real (`progress_callback` de whisper.cpp) y admite cancelación
-  (`abort_callback`, sondeado durante el cómputo).
+- Núcleo nativo: `whisper.cpp` commit `8a9ad7844d6e2a10cddf4b92de4089d7ac2b14a9`
+  (release/tag `v1.7.4`), compilado con NDK para `arm64-v8a`.
+- Puente JNI: `app/src/main/cpp/whisper_jni.cpp` ↔ `WhisperBridge.kt`; progreso real
+  mediante `progress_callback` y cancelación mediante `abort_callback`.
 - El trabajo de transcripción vive en `TranscribeViewModel` (`viewModelScope`),
-  no en la Activity: sobrevive a la rotación de pantalla sin perder el resultado
-  ni arriesgar un crash nativo por liberar el modelo mientras se usa.
-- Decodificación de audio con `MediaCodec`/`MediaExtractor` → PCM mono 16 kHz.
-- Modelos GGML descargados de Hugging Face (`ggerganov/whisper.cpp`).
-- Sin permisos de almacenamiento: usa el selector de archivos del sistema (SAF).
-  El único permiso es `INTERNET`, solo para bajar el modelo la primera vez.
-- Icono propio: micrófono blanco sobre violeta de marca (`#6C4DF2`), adaptativo
-  en Android 8+.
+  no en la Activity: sobrevive a la rotación de pantalla.
+- Decodificación con `MediaCodec`/`MediaExtractor` → PCM mono 16 kHz.
+- Límite actual: la decodificación conserva el audio completo en memoria; archivos de
+  varias horas pueden agotar la RAM. La app avisa para audios largos y captura OOM,
+  pero el procesamiento incremental por bloques sigue pendiente.
+- Modelos GGML descargados de Hugging Face (`ggerganov/whisper.cpp`). Se reanudan con
+  `Range` cuando es posible y quedan protegidos contra corrupción posterior mediante
+  tamaño y SHA-256 local. Ese hash no autentica la primera descarga.
+- Sin permisos de almacenamiento: usa SAF. `INTERNET`/estado de red se usan para la
+  descarga del modelo.
+- Icono propio: micrófono blanco sobre violeta `#6C4DF2`.
+- **Android no incorpora actualmente la diarización V5.1 del escritorio.**
 
-> Nota: se compila únicamente para `arm64-v8a` (prácticamente todos los teléfonos
-> desde ~2016). Para soportar emuladores x86_64 o equipos muy antiguos, añade esas
-> ABI en `app/build.gradle` (`abiFilters`).
+> Nota: se compila únicamente para `arm64-v8a`. Para soportar otras ABI hay que cambiar
+> `abiFilters` y validar de nuevo tamaño, rendimiento y CI.

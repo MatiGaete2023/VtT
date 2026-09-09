@@ -5,13 +5,14 @@ set(CMAKE_CXX_STANDARD 17)
 
 include(FetchContent)
 
-# Descarga whisper.cpp en tiempo de compilacion (fijado a una version estable).
-# Asi no hay que versionar el codigo C++ ni usar submodulos.
+# whisper.cpp fijado al commit exacto al que resuelve el release v1.7.4.
+# Se usa un SHA y no un tag movil para que builds futuros no cambien de codigo
+# nativo sin una modificacion explicita de este archivo.
 FetchContent_Declare(
     whisper
-    GIT_REPOSITORY https://github.com/ggerganov/whisper.cpp.git
-    GIT_TAG        v1.7.4
-    GIT_SHALLOW    TRUE
+    GIT_REPOSITORY https://github.com/ggml-org/whisper.cpp.git
+    GIT_TAG        8a9ad7844d6e2a10cddf4b92de4089d7ac2b14a9
+    GIT_SHALLOW    FALSE
 )
 
 # Opciones para una compilacion Android limpia y minima.
