@@ -1,11 +1,12 @@
-// Puente JNI entre la app Android (Kotlin) y whisper.cpp.
-// Expone: inicializar el modelo, transcribir un buffer de audio PCM (con
-// progreso y cancelacion), y liberar.
+// Puente JNI entre la app Android y whisper.cpp.
 #include <jni.h>
 #include <atomic>
 #include <cctype>
 #include <cstdio>
+#include <memory>
+#include <mutex>
 #include <string>
+#include <unordered_map>
 #include <vector>
 #include <android/log.h>
 
@@ -17,26 +18,67 @@
 
 namespace {
 
-// El "handle" que se entrega a Kotlin envuelve el contexto de whisper.cpp
-// junto con una bandera de cancelacion. whisper_full() sondea esta bandera
-// via abort_callback (tipo ggml_abort_callback: bool(*)(void*)) durante el
-// computo, asi que puede cancelarse en cualquier momento desde otro hilo
-// simplemente escribiendo en el atomic (sin volver a llamar a la JVM).
+// El jlong expuesto a Kotlin ya no es un puntero crudo sino un id opaco. El
+// registro entrega shared_ptr temporales: nativeFree puede retirar el id sin
+// dejar un puntero colgante si requestAbort entra simultaneamente. ctx_mutex
+// protege la vida del contexto pesado; abort sigue siendo atomico y no toma
+// ese mutex para poder cancelar whisper_full mientras esta ejecutandose.
 struct Handle {
     struct whisper_context *ctx;
     std::atomic<bool> abort{false};
+    std::mutex ctx_mutex;
+
+    explicit Handle(struct whisper_context *value) : ctx(value) {}
+    ~Handle() {
+        if (ctx != nullptr) {
+            whisper_free(ctx);
+            ctx = nullptr;
+        }
+    }
 };
+
+std::mutex g_handles_mutex;
+std::unordered_map<jlong, std::shared_ptr<Handle>> g_handles;
+std::atomic<jlong> g_next_handle_id{1};
+
+jlong register_handle(const std::shared_ptr<Handle> &handle) {
+    jlong id = g_next_handle_id.fetch_add(1);
+    if (id <= 0) {
+        // El overflow es practicamente inalcanzable; aun asi evita el 0
+        // reservado y vuelve a una secuencia positiva.
+        g_next_handle_id.store(2);
+        id = 1;
+    }
+    std::lock_guard<std::mutex> lock(g_handles_mutex);
+    g_handles[id] = handle;
+    return id;
+}
+
+std::shared_ptr<Handle> get_handle(jlong id) {
+    if (id == 0) return nullptr;
+    std::lock_guard<std::mutex> lock(g_handles_mutex);
+    auto it = g_handles.find(id);
+    return it == g_handles.end() ? nullptr : it->second;
+}
+
+std::shared_ptr<Handle> remove_handle(jlong id) {
+    if (id == 0) return nullptr;
+    std::lock_guard<std::mutex> lock(g_handles_mutex);
+    auto it = g_handles.find(id);
+    if (it == g_handles.end()) return nullptr;
+    auto value = it->second;
+    g_handles.erase(it);
+    return value;
+}
 
 bool abort_trampoline(void *data) {
     return reinterpret_cast<std::atomic<bool> *>(data)->load();
 }
 
-// Contexto para reenviar el progreso a un listener de Kotlin durante la
-// misma llamada (mismo hilo, mismo JNIEnv que entro a nativeTranscribe).
 struct ProgressCtx {
     JNIEnv *env;
-    jobject listener;   // instancia de WhisperBridge.ProgressListener
-    jmethodID method;   // onProgress(I)V
+    jobject listener;
+    jmethodID method;
 };
 
 std::string escapar_json(const char *texto) {
@@ -74,8 +116,6 @@ void progress_trampoline(struct whisper_context * /*ctx*/, struct whisper_state 
 
 extern "C" {
 
-// Inicializa el contexto de whisper a partir de un archivo de modelo .bin (ggml).
-// Devuelve un handle (como long) o 0 si falla.
 JNIEXPORT jlong JNICALL
 Java_cl_vtt_transcriptor_WhisperBridge_nativeInit(
         JNIEnv *env, jobject /* this */, jstring jModelPath) {
@@ -84,70 +124,56 @@ Java_cl_vtt_transcriptor_WhisperBridge_nativeInit(
 
     struct whisper_context_params cparams = whisper_context_default_params();
     cparams.use_gpu = false;
-
-    struct whisper_context *ctx =
-            whisper_init_from_file_with_params(modelPath, cparams);
-
+    struct whisper_context *ctx = whisper_init_from_file_with_params(modelPath, cparams);
     env->ReleaseStringUTFChars(jModelPath, modelPath);
 
     if (ctx == nullptr) {
         LOGE("No se pudo cargar el modelo");
         return 0;
     }
-    auto *handle = new Handle{ctx};
-    return reinterpret_cast<jlong>(handle);
+    return register_handle(std::make_shared<Handle>(ctx));
 }
 
-// Libera el contexto de whisper (pesado: cientos de MB del modelo).
-//
-// A proposito NO se hace `delete handle`: nativeRequestAbort() puede recibir
-// este mismo puntero desde otro hilo sin sincronizarse con esta llamada (ver
-// comentario en Transcriber.kt), justo cuando se libera. Mantener el Handle
-// (unos pocos bytes) vivo para siempre evita un use-after-free a cambio de
-// una fuga minima y acotada: ocurre como mucho una vez por ciclo de vida del
-// ViewModel, no por cada transcripcion.
 JNIEXPORT void JNICALL
 Java_cl_vtt_transcriptor_WhisperBridge_nativeFree(
-        JNIEnv * /* env */, jobject /* this */, jlong handlePtr) {
-    if (handlePtr != 0) {
-        auto *handle = reinterpret_cast<Handle *>(handlePtr);
+        JNIEnv * /* env */, jobject /* this */, jlong handleId) {
+    auto handle = remove_handle(handleId);
+    if (!handle) return;
+    handle->abort.store(true);
+    std::lock_guard<std::mutex> lock(handle->ctx_mutex);
+    if (handle->ctx != nullptr) {
         whisper_free(handle->ctx);
         handle->ctx = nullptr;
     }
+    // shared_ptr libera tambien el Handle cuando termina cualquier
+    // requestAbort concurrente. No queda la fuga deliberada anterior.
 }
 
-// Pide que una transcripcion en curso (con este handle) se detenga lo antes
-// posible. Seguro de llamar desde cualquier hilo (bandera atomica).
 JNIEXPORT void JNICALL
 Java_cl_vtt_transcriptor_WhisperBridge_nativeRequestAbort(
-        JNIEnv * /* env */, jobject /* this */, jlong handlePtr) {
-    if (handlePtr != 0) {
-        reinterpret_cast<Handle *>(handlePtr)->abort.store(true);
-    }
+        JNIEnv * /* env */, jobject /* this */, jlong handleId) {
+    auto handle = get_handle(handleId);
+    if (handle) handle->abort.store(true);
 }
 
 JNIEXPORT void JNICALL
 Java_cl_vtt_transcriptor_WhisperBridge_nativeResetAbort(
-        JNIEnv * /* env */, jobject /* this */, jlong handlePtr) {
-    if (handlePtr != 0) {
-        reinterpret_cast<Handle *>(handlePtr)->abort.store(false);
-    }
+        JNIEnv * /* env */, jobject /* this */, jlong handleId) {
+    auto handle = get_handle(handleId);
+    if (handle) handle->abort.store(false);
 }
 
-// Transcribe audio mono a 16 kHz (float [-1,1]).
-// lang: codigo ISO ("es", "en", ...) o cadena vacia/null para deteccion automatica.
-// listener: objeto con metodo onProgress(int), o null si no interesa el progreso.
-// Devuelve un JSON con texto y segmentos temporales; usa prefijos reservados
-// para distinguir error nativo y cancelacion de una transcripcion sin voz.
 JNIEXPORT jstring JNICALL
 Java_cl_vtt_transcriptor_WhisperBridge_nativeTranscribe(
-        JNIEnv *env, jobject /* this */, jlong handlePtr,
+        JNIEnv *env, jobject /* this */, jlong handleId,
         jfloatArray jAudio, jstring jLang, jint nThreads, jobject jListener) {
 
-    if (handlePtr == 0) {
+    auto handle = get_handle(handleId);
+    if (!handle) {
         return env->NewStringUTF("__VTT_ERROR__:contexto nativo invalido");
     }
-    auto *handle = reinterpret_cast<Handle *>(handlePtr);
+    // nativeFree espera este mutex; requestAbort no lo necesita.
+    std::unique_lock<std::mutex> ctxLock(handle->ctx_mutex);
     if (handle->ctx == nullptr) {
         return env->NewStringUTF("__VTT_ERROR__:modelo no cargado");
     }
@@ -164,8 +190,7 @@ Java_cl_vtt_transcriptor_WhisperBridge_nativeTranscribe(
         lang = env->GetStringUTFChars(jLang, nullptr);
     }
 
-    whisper_full_params wparams =
-            whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
+    whisper_full_params wparams = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
     wparams.print_realtime   = false;
     wparams.print_progress   = false;
     wparams.print_timestamps = false;
@@ -177,9 +202,9 @@ Java_cl_vtt_transcriptor_WhisperBridge_nativeTranscribe(
     wparams.token_timestamps = true;
 
     if (lang != nullptr && lang[0] != '\0') {
-        wparams.language = lang;        // idioma forzado
+        wparams.language = lang;
     } else {
-        wparams.language = nullptr;     // deteccion automatica
+        wparams.language = nullptr;
     }
 
     wparams.abort_callback = abort_trampoline;
@@ -195,21 +220,21 @@ Java_cl_vtt_transcriptor_WhisperBridge_nativeTranscribe(
             wparams.progress_callback = progress_trampoline;
             wparams.progress_callback_user_data = &progressCtx;
         } else {
-            env->ExceptionClear();  // GetMethodID deja una excepcion pendiente si no encontro el metodo
+            env->ExceptionClear();
         }
     }
 
     std::string result;
-    const int rc = whisper_full(handle->ctx, wparams, audio.data(), static_cast<int>(audio.size()));
+    const int rc = whisper_full(
+        handle->ctx, wparams, audio.data(), static_cast<int>(audio.size())
+    );
     if (rc == 0 && !handle->abort.load()) {
         const int nSeg = whisper_full_n_segments(handle->ctx);
         result = "{\"text\":\"";
         std::string textoCompleto;
         for (int i = 0; i < nSeg; ++i) {
             const char *segText = whisper_full_get_segment_text(handle->ctx, i);
-            if (segText != nullptr) {
-                textoCompleto += segText;
-            }
+            if (segText != nullptr) textoCompleto += segText;
         }
         result += escapar_json(textoCompleto.c_str());
         result += "\",\"segments\":[";
@@ -246,8 +271,9 @@ Java_cl_vtt_transcriptor_WhisperBridge_nativeTranscribe(
                 const bool separa = !palabra.empty() &&
                     std::isspace(static_cast<unsigned char>(token_text[0]));
                 if (separa) emitir_palabra();
-                while (*token_text &&
-                       std::isspace(static_cast<unsigned char>(*token_text))) ++token_text;
+                while (*token_text && std::isspace(static_cast<unsigned char>(*token_text))) {
+                    ++token_text;
+                }
                 if (token_text[0] == '\0') continue;
                 if (inicio_palabra < 0) inicio_palabra = token.t0;
                 fin_palabra = token.t1;
@@ -268,7 +294,6 @@ Java_cl_vtt_transcriptor_WhisperBridge_nativeTranscribe(
     if (lang != nullptr) {
         env->ReleaseStringUTFChars(jLang, lang);
     }
-
     return env->NewStringUTF(result.c_str());
 }
 
