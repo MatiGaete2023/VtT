@@ -20,16 +20,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
         with:
           distribution: temurin
           java-version: "17"
 
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
 
       - name: Install NDK and CMake
         run: |
@@ -40,7 +40,7 @@ jobs:
             "cmake;3.22.1"
 
       - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
         with:
           gradle-version: "8.7"
 
@@ -54,7 +54,7 @@ jobs:
           cp android/app/build/outputs/apk/debug/app-debug.apk dist/TranscriptorVtT.apk
 
       - name: Upload APK artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: TranscriptorVtT-debug-apk
           path: dist/TranscriptorVtT.apk
@@ -62,7 +62,7 @@ jobs:
 
       - name: Publish to a rolling release
         if: github.event_name != 'pull_request'
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           tag_name: android-latest
           name: Transcriptor VtT (APK más reciente)
@@ -82,7 +82,7 @@ jobs:
     if: github.event_name != 'pull_request'
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Verificar si hay keystore configurado
         id: check
@@ -98,14 +98,14 @@ jobs:
 
       - name: Set up JDK 17
         if: steps.check.outputs.tiene_keystore == 'true'
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
         with:
           distribution: temurin
           java-version: "17"
 
       - name: Set up Android SDK
         if: steps.check.outputs.tiene_keystore == 'true'
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
 
       - name: Install NDK and CMake
         if: steps.check.outputs.tiene_keystore == 'true'
@@ -118,7 +118,7 @@ jobs:
 
       - name: Set up Gradle
         if: steps.check.outputs.tiene_keystore == 'true'
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
         with:
           gradle-version: "8.7"
 
@@ -156,7 +156,7 @@ jobs:
 
       - name: Upload signed APK artifact
         if: steps.check.outputs.tiene_keystore == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: TranscriptorVtT-release-apk
           path: |
