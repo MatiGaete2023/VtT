@@ -2,221 +2,175 @@
 
 **Actualizado:** 9 de septiembre de 2026  
 **Rama de trabajo:** `claude/voice-transcriber-multiplatform-6xifq1`  
-**Estado V5.1:** **CIERRE VERIFICADO**
+**Estado:** V5.2-performance en cierre de verificación
 
-Este documento describe el estado real posterior a la auditoría V5.1. Los defectos históricos ya resueltos no se mantienen como pendientes.
+## 1. Objetivo
 
-## 1. Objetivo del producto
-
-VtT debe ofrecer transcripción local y privada, con instalación razonablemente simple, en:
-
-- escritorio Windows/macOS/Linux;
-- Android ARM64.
-
-La red se usa únicamente para instalar dependencias, descargar modelos, descargar contenido mediante una acción explícita de YouTube y ejecutar CI/build. No se incorpora telemetría.
+VtT debe ofrecer transcripción local y privada con una instalación simple en escritorio Windows/macOS/Linux y Android ARM64. La red se limita a dependencias, modelos, descarga explícita de YouTube y CI/build. No hay telemetría.
 
 ## 2. Estado actual
 
-### Escritorio V5.1
+### Escritorio V5.2
 
-- Python 3.9+.
-- Entry point: `desktop/vtt_main.py`.
-- ASR: faster-whisper/CTranslate2.
-- Diarización: sherpa-onnx.
-- perfiles ASR y perfiles de diarización independientes;
-- Auto estructural con reintento condicionado;
-- worker persistente;
-- alineación palabra↔hablante;
-- división interna de segmentos por cambio de voz;
-- verificación V5.1 de identidad mediante embeddings y prototipos conservadores;
-- escaneo local acotado de turnos largos;
-- confianza de identidad y del conteo;
-- JSON schema v6;
-- DOCX diagnóstico;
-- CI y PyInstaller verificados en Windows/macOS/Ubuntu.
+- Python 3.9+; entrypoint `desktop/vtt_main.py`.
+- faster-whisper/CTranslate2.
+- sherpa-onnx con perfiles de diarización.
+- modos globales Rápido/Equilibrado/Preciso/Personalizado.
+- migración conservadora de configuraciones anteriores.
+- Auto estructural + precheck acústico presupuestado + selección identity-aware.
+- worker persistente y reutilización de PCM/embeddings.
+- sonda de turnos largos antes del escaneo detallado.
+- conteos sherpa / identidad / texto separados.
+- JSON schema v7 y DOCX diagnóstico.
+- modelos sherpa con tamaño y SHA-256 auditado fijado en código.
 
 ### Android
 
-- Kotlin + whisper.cpp/JNI;
-- `TranscribeViewModel` para ciclo de vida;
-- progreso/cancelación nativa;
-- audio/video compartido;
-- TXT/SRT;
-- descarga reanudable de modelos;
-- integridad local por tamaño + SHA-256 post-descarga;
-- whisper.cpp fijado al commit `8a9ad7844d6e2a10cddf4b92de4089d7ac2b14a9`;
-- APK debug CI verificado;
-- sin diarización V5.1.
+- Kotlin + whisper.cpp/JNI, minSdk 24, ARM64.
+- `TranscribeViewModel`, progreso/cancelación nativa, ACTION_SEND/ACTION_VIEW.
+- TXT/SRT y persistencia del último documento.
+- GGML tiny/base/small con hash esperado antes de aceptar la primera descarga.
+- audios >5 min por bloques de 90 s con 2 s de solapamiento.
+- handles JNI opacos y liberables con shared_ptr/mutex.
+- whisper.cpp fijado a commit exacto.
+- sin diarización por diseño actual.
 
 ## 3. Reglas transversales
 
-1. Audio del usuario procesado localmente.
-2. Sin telemetría ni analytics.
-3. Escritorio: Python mínimo 3.9; Android: minSdk 24/ARM64 salvo decisión expresa.
-4. Sin exigir permisos de administrador para el flujo normal de Windows.
-5. No perder ni sobrescribir silenciosamente el trabajo del usuario.
-6. Documentación, mensajes de UI y commits del proyecto en español.
-7. No afirmar como verificado algo que solo es estimado.
-8. Antes de usar una API externa, comprobar su firma/versión real.
-9. Código modular de escritorio: las nuevas responsabilidades deben permanecer en capas específicas.
-10. Todo cambio funcional debe tener verificación prevista y posterior.
+1. Audio procesado localmente.
+2. Sin telemetría.
+3. Windows normal sin privilegios de administrador.
+4. No perder ni sobrescribir silenciosamente trabajo.
+5. No presentar estimaciones como ground truth.
+6. APIs y dependencias externas deben verificarse contra la versión realmente utilizada.
+7. No inventar digests; distinguir pin auditado de firma publicada por upstream.
+8. Nuevas responsabilidades de escritorio deben vivir en módulos específicos.
+9. Todo cambio funcional debe tener prueba prevista y posterior.
+10. Infraestructura temporal de verificación debe retirarse tras usarse.
 
 ## 4. Fases cerradas
 
 ### F1 — Robustez de escritorio
 
-Cerrado:
-
-- loopback Windows mediante soundcard;
-- grabaciones/transcripciones persistentes;
-- actualización de venv por hash de requirements;
-- instalación asíncrona de componentes de grabación;
-- cierre seguro del WAV;
-- salidas no destructivas;
-- validación de pista de audio;
-- lotes con éxito parcial;
-- cancelación con salida parcial cuando hay material.
+Cerrado: loopback Windows, persistencia, venv por hash, instalaciones asíncronas, WAV seguro, salidas no destructivas, validación de pista de audio, lotes y cancelación parcial.
 
 ### F2 — Pipeline mejorado
 
-Cerrado:
-
-- perfiles ASR;
-- batching/backends medidos;
-- bloques legibles;
-- DOCX;
-- JSON detallado;
-- glosario/hotwords;
-- revisión sincronizada.
+Cerrado: perfiles ASR, batching/backends, bloques legibles, DOCX/JSON, glosario, revisión sincronizada.
 
 ### F3 — Diarización V4/V5
 
-Cerrado:
-
-- perfiles Rápida/Equilibrada/Precisa;
-- Auto estructural;
-- progreso y ETA de diarización;
-- worker persistente;
-- instrumentación wall e interna cuando está disponible;
-- alineación por palabra y división por cambio de voz.
+Cerrado: perfiles, Auto estructural, progreso, worker persistente, timers y alineación palabra↔hablante.
 
 ### F4 — Identidad V5.1
 
-Cerrado:
+Cerrado: prototipos conservadores, protección de microintervenciones, escaneo local, confianza y tratamiento de Auto como estimación.
 
-- prototipos acústicos por identidad;
-- protección de microintervenciones;
-- exclusión de turnos largos de prototipos;
-- reasignación solo con evidencia acústica y margen;
-- escaneo local acotado;
-- confianza por identidad;
-- Auto presentado como estimación, no ground truth;
-- JSON schema v6.
+### F5 — V5.2-performance
 
-## 5. Cierre V5.1 — EJECUTADO
+Implementado:
 
-### C1. Documentación coherente — OK
+- precheck de identidad antes de una segunda pasada completa en casos compatibles;
+- selección identity-aware entre candidatos ambiguos;
+- control rival-aware de identidades con dos apariciones;
+- sonda barata para turnos largos;
+- reutilización de PCM/embeddings;
+- conteos separados por etapa;
+- JSON schema v7;
+- modos globales y presupuesto de tiempo real;
+- benchmark ASR reproducible;
+- pins auditados de modelos sherpa;
+- migración de perfiles sin sobrescribir preferencias antiguas.
 
-Actualizados `README.md`, `desktop/README.md`, `AUDITORIA.md`, `PLAN_MAESTRO.md`, `PRUEBAS_MANUALES.md`, `AGENTS.md`, `MODEL_CATALOG.md` y `android/README.md`.
+### F6 — Hardening Android
 
-Ya no se describe Python 3.8, JSON v2 ni una arquitectura monolítica como estado actual.
+Implementado:
 
-### C2. Auditoría Android/workflows — OK con límites documentados
+- SHA-256 esperado de GGML en primera descarga;
+- bloques largos con decodificación temporal acotada;
+- handle JNI sin fuga deliberada;
+- Actions fijadas por SHA.
 
-Comprobados ciclo de vida, cancelación, descarga/integridad de modelos, manifest/intents, Gradle, CMake/JNI y workflows. Cambios permanentes:
+## 5. Verificación ya ejecutada
 
-- pin exacto de whisper.cpp;
-- permisos GitHub Actions reducidos por job;
-- limpieza del keystore temporal.
+### Smoke acústico V5.2
 
-Límite de producto que continúa: audio Android completo en memoria para transcribir; requiere una fase específica por bloques y pruebas físicas.
+Audios oficiales sherpa:
 
-### C3. Smoke acústico V5.1 — OK
+- 2 hablantes → 2;
+- 4 hablantes → 4;
+- una pasada en ambos;
+- reutilización de modelos, motor y extractor comprobada.
 
-Audios oficiales sherpa-onnx:
+El workflow temporal utilizado para la campaña fue eliminado.
 
-- 2 hablantes → 2 detectados, identidad media;
-- 4 hablantes → 4 detectados, identidad alta;
-- 1 pasada en ambos;
-- reutilización de modelos, motor y extractor comprobada en el segundo archivo.
+### Hashes sherpa
 
-El workflow temporal usado para esta prueba fue eliminado después.
+Dos descargas independientes de assets oficiales produjeron los mismos hashes para archive y embedding; se obtuvo además el hash del ONNX extraído. Los valores están fijados en `vtt_diarization.py` y probados por regresión.
 
-### C4. PyInstaller V5.1 — OK
+### Benchmark ASR público
 
-`Desktop executables #6` completó exitosamente Windows/macOS/Ubuntu y produjo artefactos para los tres sistemas.
+`benchmark_asr.py` ejecutó las cuatro combinaciones previstas sobre `jfk.flac`. Sirve para verificar flujo y costo relativo en ese runner, no como benchmark de precisión del audio del usuario.
 
-### C5. Limpieza — OK
+### Android
 
-- smoke workflow temporal eliminado;
-- `desktop-build.yml` restaurado a `workflow_dispatch` manual y al blob original;
-- comparación final no muestra diferencias netas del trigger temporal.
+La implementación de bloques largos/JNI/model hashes compiló en el workflow Android. Debe volver a comprobarse el workflow final cuando termine la última actualización de Actions/documentación.
 
-## 6. Roadmap posterior
+## 6. Pendientes que NO requieren audio del usuario
 
-### P1 — Android: audio largo por bloques
+Antes del cierre final de esta rama:
 
-Problema real abierto: `AudioDecoder` conserva PCM completo en memoria. Diseñar decodificación incremental y transcripción por bloques con solape. Debe resolver:
+1. CI desktop final verde con las últimas pruebas/documentación.
+2. Android APK final verde con el workflow actualizado.
+3. PyInstaller final Windows/macOS/Ubuntu.
+4. confirmar ausencia de workflows/triggers temporales y coherencia del árbol/documentación.
 
-- continuidad de timestamps;
-- deduplicación del solape;
-- cancelación;
-- memoria acotada;
-- persistencia parcial.
+## 7. Roadmap que sí requiere evaluación externa
 
-No implementar sin pruebas en dispositivo físico.
+### R1 — Calidad acústica real V5.2
 
-### P2 — Supply-chain hardening
+Repetir un audio problemático conocido y comparar:
 
-- fijar GitHub Actions por SHA tras comprobar cada acción;
-- evaluar lockfile/hash de dependencias Python para builds reproducibles;
-- completar un catálogo de hashes esperados de modelos cuando exista una fuente confiable.
+- ASR seconds;
+- diarización total;
+- precheck y si evita segunda pasada;
+- número de clusters por etapa;
+- confianza de identidad;
+- revisión humana de cambios/etiquetas.
 
-No inventar digests.
+No prometer tiempo menor a real-time hasta medirlo en el hardware objetivo.
 
-### P2 — Métricas de calidad de diarización
+### R2 — Corpus anotado
 
-Construir un corpus pequeño con ground truth manual de hablantes y cambios. Medir DER/JER o, como mínimo, precisión de boundaries y consistencia de identidad. Los audios oficiales de 2/4 hablantes son smoke tests, no benchmark suficiente.
+Construir corpus pequeño con ground truth temporal y medir DER/JER o métricas equivalentes de boundaries/identidad.
 
-### P3 — Android y diarización
+### R3 — Hardware
 
-No trasladar sherpa/V5.1 al APK hasta resolver costo, tamaño de modelos, memoria y UX. Android mantiene ASR local sin diarización por diseño actual.
+- micrófono y loopback por SO;
+- CUDA;
+- Android físico: bloques largos, memoria, batería, temperatura, cancelación y actualización firmada.
 
-### P3 — Handle JNI
+### R4 — Android diarización
 
-Evaluar una sincronización que permita liberar también el pequeño `Handle` nativo sin riesgo de carrera con `nativeRequestAbort`. La fuga actual es deliberada y de pocos bytes por handle, no del modelo pesado.
+No trasladar sherpa/V5.2 al APK hasta evaluar tamaño, memoria, rendimiento y UX. Android permanece ASR-only.
 
-## 7. Configuración recomendada para uso real
+### R5 — Reproducibilidad adicional
 
-### Escritorio general
+Evaluar lock/hashes de dependencias Python y una política de actualización periódica de Actions/model pins. No mezclar actualización automática con confianza implícita.
 
-- modelo: `small` o `medium` según hardware/precisión;
-- ASR: Equilibrado;
-- diarización: Equilibrada;
-- Auto cuando no se conoce el número de voces;
-- Precisa solo cuando el costo CPU sea aceptable.
+## 8. Configuración recomendada
 
-### Evaluación de un problema
+Uso general: modo global **Equilibrado**. Si una configuración antigua o específica no coincide con un preset, conservar **Personalizado**. Usar Preciso solo cuando su costo tenga una justificación concreta.
 
-Comparar en el mismo audio:
+## 9. Criterio de tarea terminada
 
-1. ASR seconds;
-2. diarization seconds;
-3. wall por cada pasada;
-4. número estimado de voces;
-5. confianza de identidad;
-6. segmentos divididos/cambios internos;
-7. revisión humana de boundaries seleccionados.
+Una tarea se cierra cuando:
 
-## 8. Criterio de una tarea “terminada”
+- código publicado;
+- verificación prevista ejecutada;
+- CI/build relevante verde;
+- límites documentados;
+- sin infraestructura temporal;
+- ninguna afirmación depende de un resultado no comprobado.
 
-Una tarea solo se cierra cuando:
-
-- el código está publicado;
-- la verificación prevista se ejecutó;
-- CI relevante está verde;
-- se documentaron limitaciones;
-- no quedaron archivos/workflows temporales;
-- el resultado no depende de una afirmación no comprobada.
-
-Si un mismo fallo se repite 5–10 veces sin una estrategia nueva, detener los reintentos, documentar causa/estado y continuar con el siguiente problema.
+Ante dos fallos de la misma causa, cambiar de estrategia en lugar de repetir indefinidamente.
