@@ -4,66 +4,80 @@ Contrato para cualquier persona o agente que modifique este repositorio.
 
 ## 1. Producto y plataformas
 
-VtT es un transcriptor local y privado con dos aplicaciones relacionadas pero no equivalentes:
+VtT tiene dos aplicaciones relacionadas pero no equivalentes:
 
-- `desktop/`: Python/Tkinter, faster-whisper y diarización opcional sherpa-onnx.
-- `android/`: Kotlin + whisper.cpp/JNI. Android no incorpora actualmente la diarización V5.1 del escritorio.
+- `desktop/`: Python/Tkinter, faster-whisper y diarización sherpa-onnx V5.2.
+- `android/`: Kotlin + whisper.cpp/JNI. Android no incorpora diarización del escritorio.
 
 ## 2. Reglas inquebrantables
 
-1. **Offline-first y privado.** El audio del usuario no se envía a servicios de transcripción. Red solo para instalación/actualización de dependencias, descarga inicial de modelos, descarga explícita de YouTube y CI/build.
-2. **Sin telemetría.** No añadir analytics, tracking ni llamadas de red no necesarias para las funciones anteriores.
-3. **Instalación simple.** Escritorio: Python 3.9+ y `run.bat`/`run.sh`/`python run.py`. Android: APK.
-4. **Sin privilegios de administrador en el flujo normal de Windows.** Si una solución requiere un paquete de sistema en Linux o un dispositivo virtual en macOS, debe advertirse y documentarse.
-5. **Nunca perder trabajo.** Grabaciones/transcripciones deben ir a destinos persistentes; las exportaciones no deben sobrescribir silenciosamente archivos del usuario.
-6. **No confundir estimación con certeza.** El número Auto de hablantes y la confianza V5.1 son estimaciones acústicas; solo existe ground truth cuando se aporta externamente.
-7. **Idioma del producto:** UI, mensajes y documentación en español. Mantener identificadores existentes cuando renombrarlos no aporte valor.
-8. **Compatibilidad:** escritorio Python ≥3.9; Android minSdk 24 y `arm64-v8a` salvo decisión explícita.
-9. **No versionar** `.venv`, modelos descargados, grabaciones, transcripciones de usuario, builds, APK o temporales.
-10. **Verificar APIs externas.** Antes de usar una API de una dependencia, comprobar la firma de la versión realmente utilizada.
-11. **No inventar hashes.** Si una fuente no publica un digest esperado confiable, documentar la limitación y usar las comprobaciones disponibles sin presentarlas como autenticación de origen.
-12. **Cambios con verificación.** Antes de modificar, definir cómo se comprobará; después ejecutar esa comprobación antes de declarar el cambio correcto.
+1. **Offline-first y privado.** El audio del usuario no se envía a servicios de transcripción.
+2. **Sin telemetría.** No añadir analytics/tracking.
+3. **Instalación simple.** Escritorio Python 3.9+; Android APK.
+4. **Sin privilegios de administrador en Windows normal.** Documentar requisitos de sistema de Linux/macOS cuando existan.
+5. **Nunca perder trabajo.** No sobrescribir silenciosamente grabaciones/exportaciones.
+6. **No confundir estimación con certeza.** Auto y confianza acústica no son ground truth.
+7. **Idioma del producto:** UI, mensajes y documentación en español.
+8. **Compatibilidad:** escritorio Python ≥3.9; Android minSdk 24 y ARM64 salvo decisión expresa.
+9. **No versionar** venv, modelos descargados, grabaciones, transcripciones, builds/APK o temporales.
+10. **Verificar APIs externas** contra la versión realmente utilizada.
+11. **No inventar hashes.** Distinguir un digest publicado por upstream de un pin auditado/reproducido por VtT.
+12. **Supply chain:** workflows de CI/build deben preferir acciones fijadas por SHA y revisiones explícitas.
+13. **Cambios con verificación.** Definir y ejecutar la comprobación antes de cerrar.
+14. **Infraestructura temporal:** eliminar workflows/triggers temporales después de recopilar evidencia.
 
 ## 3. Arquitectura de escritorio
 
-El escritorio ya no es monolítico. `transcriptor_whisper.py` conserva la base histórica de UI, grabación, YouTube y utilidades; las funciones nuevas se implementan en módulos separados.
-
 Entry point final: `desktop/vtt_main.py`.
 
-Capas principales:
+Capas actuales:
 
-- `vtt_core.py`: estructuras, bloques, métricas y exportación base.
+- `vtt_core.py`: estructuras, bloques y exportación base.
 - `vtt_alignment.py`: alineación palabra↔hablante.
-- `vtt_diarization_v5.py`: motor/worker persistente, Auto e instrumentación.
-- `vtt_diarization_v51.py`: verificación acústica de identidad.
-- `vtt_identity.py`: prototipos, consistencia y escaneo local.
-- `vtt_pipeline_v51.py`: pipeline final.
-- `vtt_reporting_v51.py`: JSON schema v6 y DOCX diagnóstico.
-- `vtt_ui_v51.py`: indicaciones de costo/recomendación de diarización.
+- `vtt_diarization_v5.py`: motor persistente e instrumentación base.
+- `vtt_identity_v52.py`: identidad rival-aware y sonda de turnos largos.
+- `vtt_diarization_v52.py`: precheck Auto, selección identity-aware y reutilización acústica.
+- `vtt_validation_v52.py`: conteos/validación por etapa.
+- `vtt_reporting_v52.py`: JSON schema v7 y DOCX diagnóstico.
+- `vtt_performance.py`: modos globales y presupuesto de rendimiento.
+- `vtt_pipeline_v52.py`: pipeline final.
+- `vtt_ui_v52.py`: UI de modos globales y migración conservadora.
 
-No vuelva a concentrar lógica nueva en `transcriptor_whisper.py` si puede vivir en una capa específica.
+No volver a concentrar lógica nueva en `transcriptor_whisper.py` si puede vivir en una capa específica.
 
 ### Hilos y Tk
 
-Los hilos de trabajo no deben modificar widgets directamente. La comunicación con Tk se hace mediante colas y `root.after`/mecanismos existentes. Mantener el worker de diarización fuera del hilo de UI.
+Los workers no modifican widgets directamente. Usar colas y `root.after`/mecanismos existentes. Mantener diarización fuera del hilo UI.
 
-### Diarización
+### Diarización/identidad
 
-- `Equilibrada` es el perfil recomendado.
-- `Precisa` tiene alto costo CPU.
+- Equilibrada es la recomendación general.
+- Precisa tiene alto costo CPU.
 - Una intervención breve no se fusiona solo por duración.
-- Turnos largos no deben formar prototipos de identidad si pueden contener varias voces.
-- En modo manual de número de hablantes, no crear identidades adicionales automáticamente sin una decisión explícita de diseño.
+- Turnos largos no forman prototipos si pueden contener varias voces.
+- El precheck V5.2 tiene presupuesto acotado; no debe transformarse en otra diarización completa.
+- En modo manual N, no crear identidades adicionales automáticamente sin decisión explícita.
+- Mantener separados clusters sherpa, clusters tras identidad y hablantes con texto.
 
-## 4. Android
+### Migración de configuración
 
-El trabajo de transcripción vive en `TranscribeViewModel` (`viewModelScope`). `Transcriber` sincroniza carga/transcripción/liberación del contexto nativo. `requestAbort()` es la vía no bloqueante de cancelación.
+No introducir presets que sobreescriban opciones existentes. Una configuración previa solo puede reconocerse como preset si coincide de forma inequívoca; de lo contrario debe conservarse como Personalizado.
 
-El audio largo sigue siendo una deuda conocida: `AudioDecoder` mantiene el PCM completo en memoria. No introducir un procesamiento por bloques sin resolver timestamps, solape, deduplicación y cancelación y sin probarlo en un dispositivo físico.
+## 4. Modelos de diarización
 
-Los modelos descargados usan sidecars de tamaño/hash para integridad local. Eso no sustituye un hash esperado de origen.
+Los hashes fijados en `vtt_diarization.py` corresponden a assets oficiales k2-fsa auditados por VtT. No reemplazarlos por valores calculados desde una descarga nueva sin una revisión expresa. Un cambio upstream requiere revisar tamaño/hash, smoke acústico y documentación.
 
-## 5. Verificación obligatoria
+## 5. Android
+
+- Trabajo: `TranscribeViewModel`.
+- `Transcriber` sincroniza carga/transcripción/liberación.
+- JNI usa handles opacos/shared_ptr y aborto atómico.
+- >5 min: procesamiento por bloques 90 s + 2 s de solapamiento.
+- Modelos GGML deben coincidir con el SHA-256 esperado antes de la primera promoción.
+
+No eliminar el solapamiento/deduplicación ni volver al PCM completo sin medir timestamps, memoria y calidad. Android sigue sin diarización.
+
+## 6. Verificación obligatoria
 
 Si se toca `desktop/*.py`:
 
@@ -72,30 +86,22 @@ python -m py_compile <módulos afectados>
 python -m pytest tests -q
 ```
 
-La verificación final oficial es `Desktop checks` en Windows/macOS/Ubuntu.
+Cierre oficial: `Desktop checks` en Windows/macOS/Ubuntu.
 
-Si se toca empaquetado o imports del entrypoint, ejecutar también `Desktop executables` con PyInstaller en los tres SO.
+Si se toca empaquetado/imports del entrypoint: `Desktop executables` en los tres SO.
 
-Si se toca `android/`, no cerrar la tarea hasta que `Android APK` compile en verde. Las pruebas de hardware real siguen siendo manuales.
+Si se toca `android/`: `Android APK` verde. Hardware real sigue siendo manual.
 
-Si se toca diarización/identidad, añadir o actualizar pruebas de lógica pura y, cuando sea posible, ejecutar smoke acústico con audios de ground truth conocido.
+Si se toca diarización/identidad/model pins: pruebas de lógica + smoke con ground truth conocido cuando sea posible.
 
-## 6. Documentación
+## 7. Documentación
 
-Un documento no puede describir como actual una arquitectura antigua. Actualizar el README relevante en el mismo ciclo cuando cambien:
+Actualizar los README/plan/auditoría cuando cambien mínimos, entrypoint, schema JSON, perfiles, dependencias, seguridad de modelos o limitaciones.
 
-- mínimos de Python/Android;
-- entrypoint;
-- formato JSON;
-- perfiles;
-- dependencias;
-- limitaciones;
-- comportamiento de Auto/identidad.
+## 8. Qué no hacer
 
-## 7. Qué no hacer
-
-- No reescribir la aplicación en Electron/Qt/web sin una decisión de producto.
-- No usar `sounddevice.WasapiSettings(loopback=True)`; el loopback de Windows se implementa con `soundcard`.
-- No afirmar que Android tiene diarización si no existe en el código Android.
-- No presentar la confianza V5.1 como identificación biométrica.
-- No hacer reintentos indefinidos. Si el mismo problema persiste tras 5–10 intentos con cambios razonables, documentar causa, evidencia y limitación, y continuar con el siguiente problema.
+- No reescribir en Electron/Qt/web sin decisión de producto.
+- No usar `sounddevice.WasapiSettings(loopback=True)`; Windows loopback usa `soundcard`.
+- No afirmar que Android tiene diarización.
+- No presentar confianza acústica como biometría.
+- No repetir indefinidamente una estrategia fallida: tras dos fallos de la misma causa, cambiar de enfoque.
