@@ -146,6 +146,21 @@ def test_global_equilibrado_targets_small_and_balanced_diarization():
     assert p["diar_profile"] == "Equilibrada"
 
 
+def test_migracion_reconoce_preset_solo_si_coincide_completo():
+    assert performance.infer_global_profile(
+        "small", "Equilibrado", "Equilibrada"
+    ) == "Equilibrado"
+    assert performance.infer_global_profile(
+        "medium", "Preciso", "Precisa"
+    ) == "Preciso"
+    assert performance.infer_global_profile(
+        "medium", "Preciso", "Equilibrada"
+    ) == "Personalizado"
+    assert performance.infer_global_profile(
+        "large-v3", "Preciso", "Precisa"
+    ) == "Personalizado"
+
+
 def test_performance_budget_detects_realtime():
     ok = performance.performance_status({
         "audio_seconds": 404, "processing_seconds": 390,
