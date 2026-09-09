@@ -90,12 +90,30 @@ class DiarizacionV52UIMixin(v51.DiarizacionV51UIMixin):
         self.lbl_global_profile.configure(text=text)
 
     def _aplicar_config(self):
+        # Primero deja que las capas previas restauren exactamente los controles
+        # que el usuario ya tenía guardados.
         super()._aplicar_config()
-        value = str(self.cfg.get("global_profile", "Equilibrado"))
-        if value not in perf.GLOBAL_PROFILES:
-            value = "Equilibrado"
-        self.v_global_profile.set(value)
+
+        stored = self.cfg.get("global_profile")
+        if stored in perf.GLOBAL_PROFILES:
+            value = str(stored)
+        else:
+            # Migración V5.1 -> V5.2: reconocer un preset solo cuando los tres
+            # controles restaurados coinciden. Cualquier combinación distinta
+            # queda en Personalizado y NO se modifica silenciosamente.
+            value = perf.infer_global_profile(
+                self.cmb_m.get(), self.v_perfil.get(), self.v_diar_perfil.get()
+            )
+
+        self._global_applying = True
+        try:
+            self.v_global_profile.set(value)
+        finally:
+            self._global_applying = False
+        # Si existe un preset explícito sí corresponde normalizar sus tres
+        # controles; Personalizado conserva lo que restauró super().
         self._apply_global_profile()
+        self._global_profile_run = self.v_global_profile.get()
 
     def _snapshot_config(self):
         super()._snapshot_config()
