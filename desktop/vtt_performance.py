@@ -53,6 +53,28 @@ def global_profile(name: str) -> Dict[str, Any]:
     return out
 
 
+def infer_global_profile(model: str, asr_profile: str, diar_profile: str) -> str:
+    """Reconoce un preset solo si los tres controles coinciden exactamente.
+
+    Es deliberadamente conservador para migrar configuraciones V5.1 o
+    anteriores: si el usuario tenía una combinación propia, V5.2 debe abrir en
+    ``Personalizado`` en vez de sobrescribir silenciosamente sus opciones con
+    el nuevo preset Equilibrado.
+    """
+    wanted = (str(model), str(asr_profile), str(diar_profile))
+    for name, cfg in GLOBAL_PROFILES.items():
+        if name == "Personalizado":
+            continue
+        candidate = (
+            str(cfg.get("model")),
+            str(cfg.get("asr_profile")),
+            str(cfg.get("diar_profile")),
+        )
+        if wanted == candidate:
+            return name
+    return "Personalizado"
+
+
 def performance_status(metrics: Mapping[str, Any]) -> Dict[str, Any]:
     audio = max(0.0, float(metrics.get("audio_seconds", 0.0) or 0.0))
     processing = max(0.0, float(metrics.get("processing_seconds", 0.0) or 0.0))
