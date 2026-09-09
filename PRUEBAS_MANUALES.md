@@ -68,75 +68,45 @@ No atribuir diferencias entre PCs distintos al perfil.
 
 ## 5. Diarización V5.2 en audio escuchable
 
-Referencia recomendada:
+Referencia: hablantes Auto, diarización Equilibrada y Word/JSON activos.
 
-- modo global Equilibrado o Personalizado;
-- hablantes Auto;
-- diarización Equilibrada;
-- Word/JSON activos.
-
-Registrar:
-
-- clusters sherpa seleccionados;
-- clusters tras identidad;
-- hablantes con texto y clusters sin texto;
-- perfil/Window shift;
-- pasadas Auto;
-- precheck, tiempo y si evitó segunda pasada;
-- selección identity-aware si se utilizó;
-- wall por pasada;
-- tiempo total de diarización;
-- reutilización de worker/modelos/motor/PCM;
-- embeddings y caché;
-- sonda/detalle de turnos largos;
-- reasignaciones;
-- consistencia global y por Persona.
+Registrar clusters sherpa, clusters tras identidad, hablantes con texto, clusters sin texto, perfil/shift, pasadas, precheck, selección identity-aware, wall por pasada, tiempo total, reutilización, embeddings/cache, sonda/detalle de turnos largos, reasignaciones y consistencia.
 
 Comprobar:
 
 - [ ] una misma `Persona N` no representa evidentemente dos voces diferentes;
 - [ ] intervenciones breves reales no desaparecen solo por duración;
-- [ ] cambio sostenido dentro de un turno largo produce corte razonable cuando corresponde;
+- [ ] cambio sostenido dentro de un turno largo produce corte razonable;
 - [ ] Auto ambiguo/reservado se presenta como estimación;
 - [ ] manual N respeta el conteo solicitado;
-- [ ] un cluster acústico sin palabras aparece como tal y no desaparece del reporte;
-- [ ] si el precheck evita segunda pasada, la reducción de tiempo no introduce una fusión audible incorrecta.
+- [ ] cluster acústico sin palabras sigue visible en el reporte;
+- [ ] si el precheck evita segunda pasada, no introduce fusión audible incorrecta.
 
 ## 6. Reutilización/rendimiento
 
-Sin cerrar VtT:
+Sin cerrar VtT, procesar dos archivos con el mismo perfil y luego cambiar el perfil.
 
-1. transcribir un archivo con diarización;
-2. transcribir otro con el mismo perfil.
-
-- [ ] segundo trabajo indica reutilización de modelos/motor.
+- [ ] segundo trabajo reutiliza modelos/motor cuando corresponde.
 - [ ] registrar preparación/inicialización.
-- [ ] cambiar perfil de diarización y comprobar reinicialización al cambiar `window_shift_ratio`.
-- [ ] comparar `processing_seconds` con duración; tratar real-time como objetivo medido, no garantía.
+- [ ] cambio de `window_shift_ratio` reinicializa motor.
+- [ ] comparar `processing_seconds` con duración sin tratar real-time como garantía.
 
-## 7. Smoke acústico reproducible V5.2 — OK 09-09-2026
+## 7. Smoke acústico V5.2 — OK 09-09-2026
 
-Audios oficiales:
-
-- `1-two-speakers-en.wav` → 2;
-- `0-four-speakers-zh.wav` → 4.
-
-Campaña V5.2, repetida durante el cierre:
-
-- [x] 2 → 2.
-- [x] 4 → 4.
-- [x] una pasada en ambos casos.
-- [x] verificación de identidad habilitada.
-- [x] PCM reutilizado desde diarización para identidad.
+- [x] 2 hablantes → 2.
+- [x] 4 hablantes → 4.
+- [x] una pasada en ambos.
+- [x] identidad habilitada.
+- [x] PCM reutilizado desde diarización.
 - [x] segundo trabajo reutiliza modelos/motor/extractor.
-- [x] la capa V5.2 no altera conteos correctos.
-- [x] workflow temporal eliminado al terminar.
+- [x] conteos correctos preservados.
+- [x] workflow temporal eliminado.
 
-Esto valida conteo/reutilización en dos muestras conocidas; no es DER/JER.
+Esto es smoke de conteo/reutilización, no DER/JER.
 
 ## 8. Benchmark ASR reproducible — OK 09-09-2026
 
-`benchmark_asr.py` se ejecutó sobre el `jfk.flac` público de OpenAI con timestamps por palabra:
+Sobre `jfk.flac` público de OpenAI con timestamps por palabra:
 
 ```text
 medium / Preciso      ~5.9 s · ~1.87x
@@ -145,61 +115,66 @@ small  / Preciso      ~3.2 s · ~3.47x
 small  / Equilibrado  ~1.5 s · ~7.45x
 ```
 
-- [x] las cuatro combinaciones ejecutan.
-- [x] JSON/CSV del benchmark generados en la campaña temporal.
-- [x] similitud textual 1.000 contra medium/Preciso en esa muestra.
+- [x] cuatro combinaciones ejecutan.
+- [x] JSON/CSV generados en campaña.
+- [x] similitud 1.000 frente a medium/Preciso en esa muestra.
 
-No usar estos números como estimación del audio chileno del usuario ni de otro hardware.
+No extrapolar al audio chileno del usuario ni a otro hardware.
 
 ## 9. Android físico ARM64
 
 ### Modelos/offline
 
-- [ ] primera descarga tiny/base; cortar red y confirmar reanudación.
-- [ ] alterar/truncar un modelo local y comprobar que se rechaza y reacquire.
-- [ ] modo avión después de modelo válido y transcribir archivo local.
+- [ ] cortar primera descarga y confirmar reanudación.
+- [ ] truncar/alterar modelo y comprobar rechazo/reacquisition.
+- [ ] modo avión tras modelo válido.
 
 ### Ciclo de vida
 
-- [ ] rotar durante transcripción.
-- [ ] enviar app al fondo y volver.
-- [ ] cancelar durante descarga, decodificación y transcripción.
-- [ ] ACTION_SEND.
-- [ ] ACTION_VIEW.
-- [ ] editar texto, TXT y SRT.
-- [ ] reiniciar proceso y restaurar último documento.
+- [ ] rotación.
+- [ ] fondo/vuelta.
+- [ ] cancelar en descarga, decodificación y transcripción.
+- [ ] ACTION_SEND / ACTION_VIEW.
+- [ ] TXT/SRT/edición.
+- [ ] restaurar último documento tras reinicio de proceso.
 
 ### Audio por bloques
 
-Probar al menos 10, 60 y >90 minutos:
+Probar 10, 60 y >90 minutos:
 
-- [ ] no existe OOM por materializar el audio completo.
-- [ ] timestamps globales permanecen crecientes.
-- [ ] no se observa duplicación evidente en las uniones cada ~88 s.
-- [ ] no se pierde una frase completa en el empalme.
-- [ ] cancelar en un bloque intermedio detiene el proceso.
-- [ ] registrar pico aproximado de memoria.
-- [ ] registrar batería y temperatura.
-
-La CI solo verifica que la implementación compile; estas condiciones requieren dispositivo/audio real.
+- [ ] sin OOM por PCM completo;
+- [ ] timestamps globales crecientes;
+- [ ] sin duplicación evidente en uniones ~88 s;
+- [ ] sin pérdida de frase completa en empalme;
+- [ ] cancelación intermedia;
+- [ ] memoria, batería y temperatura.
 
 ## 10. APK/release
 
-- [x] implementación Android de hashes/JNI/bloques compila en CI.
-- [ ] instalar el APK final en teléfono físico y completar flujo.
-- [ ] con secrets de firma, `assembleRelease` produce APK firmado y `.sha256`.
-- [ ] ejecutar prueba de actualización de `android/RELEASE_SETUP.md` antes de distribuir como actualización.
+- [x] `Android APK #26`: build debug final verde.
+- [x] artefacto debug y release rodante publicados por CI.
+- [ ] instalar APK final en teléfono físico y completar flujo.
+- [ ] con secrets de firma, producir/verificar APK firmado y `.sha256`.
+- [ ] prueba de actualización de `android/RELEASE_SETUP.md`.
 
-## 11. Empaquetado de escritorio
+## 11. Empaquetado escritorio — OK 09-09-2026
 
-La versión V5.1 tuvo PyInstaller verde en los tres sistemas. Para V5.2:
+`Desktop executables #7`, run `34406483435`, commit `9e6ec19bd6216362b5527ca2c00305d0c61cdfe4`:
 
-- [ ] Windows PyInstaller final.
-- [ ] Ubuntu PyInstaller final.
-- [ ] macOS PyInstaller final.
-- [ ] artefactos presentes.
-- [ ] workflow vuelve a `workflow_dispatch` sin trigger temporal.
-- [ ] abrir/usar ejecutable en hardware real (independiente del build CI).
+- [x] Windows PyInstaller.
+- [x] Ubuntu PyInstaller.
+- [x] macOS PyInstaller.
+- [x] artefactos en los tres sistemas.
+- [x] workflow restaurado a `workflow_dispatch` sin trigger temporal.
+- [ ] abrir/usar cada ejecutable en hardware real.
+
+Artefactos de CI:
+
+```text
+Windows  126.867.250 bytes  sha256:9efe1bc984b0a61113e66572223c030e14a7b4715886b58f99ec2eaa72098378
+Ubuntu   186.194.079 bytes  sha256:3a01c815bef01f9f9a18164f7a1ff4a931bc260455b3e25135487c8b6a13e94e
+macOS    198.797.590 bytes  sha256:c196761fe65e6617d790c746863fb03369422f4deda2f31b25f24d81e415356b
+```
 
 ## 12. Registro de campañas manuales
 
