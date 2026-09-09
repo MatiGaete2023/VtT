@@ -72,6 +72,12 @@ Referencia: hablantes Auto, diarización Equilibrada y Word/JSON activos.
 
 Registrar clusters sherpa, clusters tras identidad, hablantes con texto, clusters sin texto, perfil/shift, pasadas, precheck, selección identity-aware, wall por pasada, tiempo total, reutilización, embeddings/cache, sonda/detalle de turnos largos, reasignaciones y consistencia.
 
+Cuando exista selección identity-aware, registrar también:
+
+- `final_stage_wall_seconds`;
+- `light_identity_wall_seconds`;
+- `total_wall_seconds` / `identity_wall_seconds`.
+
 Comprobar:
 
 - [ ] una misma `Persona N` no representa evidentemente dos voces diferentes;
@@ -159,7 +165,7 @@ Probar 10, 60 y >90 minutos:
 
 ## 11. Empaquetado escritorio — OK 09-09-2026
 
-`Desktop executables #7`, run `34406483435`, commit `9e6ec19bd6216362b5527ca2c00305d0c61cdfe4`:
+`Desktop executables #8`, run `34407796151`, commit `5b2703d44f5196aa70769ae54ae6d945dab90d26`:
 
 - [x] Windows PyInstaller.
 - [x] Ubuntu PyInstaller.
@@ -171,12 +177,25 @@ Probar 10, 60 y >90 minutos:
 Artefactos de CI:
 
 ```text
-Windows  126.867.250 bytes  sha256:9efe1bc984b0a61113e66572223c030e14a7b4715886b58f99ec2eaa72098378
-Ubuntu   186.194.079 bytes  sha256:3a01c815bef01f9f9a18164f7a1ff4a931bc260455b3e25135487c8b6a13e94e
-macOS    198.797.590 bytes  sha256:c196761fe65e6617d790c746863fb03369422f4deda2f31b25f24d81e415356b
+Windows  126.869.051 bytes  sha256:6d949ec154ed831631f99bf865c75a7261ade18ba546dfccd78ad828d6be8438
+Ubuntu   186.195.924 bytes  sha256:3c38cc9f16e67fc919d41bc0d560b8d310e662528a65336c28d4175843594e9d
+macOS    198.803.581 bytes  sha256:9f495afc5e0f11cac65fb188f5aa5764ceaa15324fe53ea6ab375b303f4f2890
 ```
 
-## 12. Registro de campañas manuales
+## 12. Regresión de métricas de identidad — OK 09-09-2026
+
+`Desktop checks #69`, run `34407637074`:
+
+- [x] `vtt_diarization_v52_metrics.py` incluido en `py_compile`.
+- [x] prueba de suma simple `final + light`.
+- [x] valores negativos parciales no reducen el total válido.
+- [x] dos llamadas `_light_identity` simuladas se acumulan completas.
+- [x] `identity_wall_seconds` coincide con `total_wall_seconds`.
+- [x] Windows, Ubuntu y macOS verdes.
+
+Esta prueba valida contabilidad diagnóstica; no modifica ni valida calidad acústica.
+
+## 13. Registro de campañas manuales
 
 No marcar hardware como ejecutado por CI.
 
