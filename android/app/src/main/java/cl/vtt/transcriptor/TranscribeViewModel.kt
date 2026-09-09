@@ -13,14 +13,13 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.math.ceil
 
 sealed interface TranscribeUiState {
     data object Idle : TranscribeUiState
-    /** progressPct == null -> indeterminado (sin porcentaje conocido todavia). */
     data class Working(val message: String, val progressPct: Int?) : TranscribeUiState
     data class Done(
         val text: String,
-        /** Texto revisado por el usuario; null significa que aún no se editó. */
         val editedText: String? = null,
         val sourceName: String? = null,
         val segments: List<TranscriptionSegment> = emptyList()
@@ -31,17 +30,18 @@ sealed interface TranscribeUiState {
 
 /**
  * Posee el trabajo de transcripcion en viewModelScope, que sobrevive a la
- * recreacion de la Activity (p.ej. al rotar la pantalla). Antes, el trabajo
- * corria en lifecycleScope de la Activity: rotar durante una transcripcion
- * cancelaba el scope mientras la llamada nativa (no cooperativa con la
- * cancelacion de corutinas) seguia ejecutandose, y `onDestroy` podia liberar
- * el contexto de whisper.cpp mientras esa llamada todavia lo usaba -> crash
- * nativo (use-after-free). Con el trabajo aqui, la rotacion ya no lo afecta.
+ * recreacion de la Activity. Los archivos largos se procesan por ventanas
+ * solapadas para no materializar horas completas de PCM en memoria.
  */
 class TranscribeViewModel : ViewModel() {
 
     companion object {
-        private const val UMBRAL_AUDIO_LARGO_S = 90 * 60L  // 90 min
+        // Sobre este umbral se prioriza memoria acotada. whisper.cpp ya usa
+        // no_context=true, por lo que el corte no pierde un contexto global que
+        // antes estuviera activo.
+        private const val CHUNKED_THRESHOLD_S = 5 * 60L
+        private const val CHUNK_MS = 90_000L
+        private const val OVERLAP_MS = 2_000L
     }
 
     private val transcriber = Transcriber()
@@ -80,44 +80,37 @@ class TranscribeViewModel : ViewModel() {
                 }
                 if (!modeloDisponible) {
                     _uiState.value = TranscribeUiState.Working(
-                        "Descargando modelo '$model' (solo la primera vez)…", 0)
+                        "Descargando modelo '$model' (solo la primera vez)…", 0
+                    )
                 } else {
                     _uiState.value = TranscribeUiState.Working("Preparando…", null)
                 }
                 val modelFile = withContext(Dispatchers.IO) {
-                    ModelManager.ensureModel(appContext, model, isCancelled = { cancelSolicitado }) { pct ->
+                    ModelManager.ensureModel(
+                        appContext, model, isCancelled = { cancelSolicitado }
+                    ) { pct ->
                         _uiState.value = TranscribeUiState.Working(
-                            "Descargando modelo '$model' (solo la primera vez)…", pct)
+                            "Descargando modelo '$model' (solo la primera vez)…", pct
+                        )
                     }
                 }
-                if (cancelSolicitado) throw java.util.concurrent.CancellationException("cancelada")
+                if (cancelSolicitado) {
+                    throw java.util.concurrent.CancellationException("cancelada")
+                }
 
                 val duracion = withContext(Dispatchers.IO) {
                     AudioDecoder.duracionSegundos(appContext, uri)
                 }
-                val avisoLargo = if (duracion != null && duracion > UMBRAL_AUDIO_LARGO_S) {
-                    " (~${duracion / 60} min, puede tardar y usar bastante memoria)"
+                val resultado = if (duracion != null && duracion > CHUNKED_THRESHOLD_S) {
+                    transcribirPorBloques(
+                        appContext, uri, modelFile.absolutePath, model,
+                        lang.ifEmpty { null }, duracion * 1000L
+                    )
                 } else {
-                    ""
-                }
-                _uiState.value = TranscribeUiState.Working("Procesando el audio…$avisoLargo", null)
-                val audio = withContext(Dispatchers.IO) {
-                    AudioDecoder.decode(appContext, uri) { cancelSolicitado }
-                }
-                if (cancelSolicitado) throw java.util.concurrent.CancellationException("cancelada")
-                if (audio.isEmpty()) {
-                    throw IllegalStateException("No se pudo leer audio del archivo")
-                }
-
-                _uiState.value = TranscribeUiState.Working("Transcribiendo en el dispositivo…", 0)
-                val resultado = withContext(Dispatchers.Default) {
-                    if (cancelSolicitado) throw java.util.concurrent.CancellationException("cancelada")
-                    transcriber.loadModel(modelFile.absolutePath, model)
-                    if (cancelSolicitado) throw java.util.concurrent.CancellationException("cancelada")
-                    transcriber.transcribe(audio, lang.ifEmpty { null }) { pct ->
-                        _uiState.value = TranscribeUiState.Working(
-                            "Transcribiendo en el dispositivo…", pct)
-                    }
+                    transcribirArchivoCorto(
+                        appContext, uri, modelFile.absolutePath, model,
+                        lang.ifEmpty { null }
+                    )
                 }
 
                 if (cancelSolicitado) {
@@ -125,16 +118,13 @@ class TranscribeViewModel : ViewModel() {
                 } else {
                     withContext(Dispatchers.IO) {
                         TranscriptionStore.save(
-                            appContext,
-                            resultado.text,
-                            null,
-                            sourceName,
-                            model,
-                            lang,
-                            resultado.segments
+                            appContext, resultado.text, null, sourceName,
+                            model, lang, resultado.segments
                         )
                     }
-                    if (cancelSolicitado) throw java.util.concurrent.CancellationException("cancelada")
+                    if (cancelSolicitado) {
+                        throw java.util.concurrent.CancellationException("cancelada")
+                    }
                     _uiState.value = TranscribeUiState.Done(
                         resultado.text,
                         sourceName = sourceName,
@@ -145,16 +135,13 @@ class TranscribeViewModel : ViewModel() {
                 if (cancelSolicitado) {
                     _uiState.value = TranscribeUiState.Cancelled
                 } else {
-                    throw e  // cancelación estructurada del ViewModel
+                    throw e
                 }
             } catch (e: OutOfMemoryError) {
-                // Un audio muy largo (horas) puede agotar la memoria del proceso:
-                // decodificarlo entero a PCM float ocupa varias veces su duracion en
-                // MB. OutOfMemoryError es un Error, no una Exception, así que sin este
-                // catch especifico se escapaba del try/catch de abajo y tumbaba la app.
                 _uiState.value = TranscribeUiState.Error(
-                    "El audio es demasiado largo para la memoria disponible. " +
-                    "Prueba con un archivo más corto o un modelo más liviano (tiny/base).")
+                    "No hay memoria suficiente para procesar este bloque de audio. " +
+                    "Prueba con un modelo más liviano (tiny/base)."
+                )
             } catch (e: Exception) {
                 _uiState.value = if (cancelSolicitado) {
                     TranscribeUiState.Cancelled
@@ -165,9 +152,132 @@ class TranscribeViewModel : ViewModel() {
         }
     }
 
-    /** Pide cancelar la transcripcion en curso. whisper.cpp sondea la bandera
-     * de cancelacion durante el computo, asi que se detiene en poco tiempo
-     * (no instantaneo). */
+    private suspend fun transcribirArchivoCorto(
+        appContext: Context,
+        uri: Uri,
+        modelPath: String,
+        model: String,
+        lang: String?
+    ): TranscriptionResult {
+        _uiState.value = TranscribeUiState.Working("Procesando el audio…", null)
+        val audio = withContext(Dispatchers.IO) {
+            AudioDecoder.decode(appContext, uri) { cancelSolicitado }
+        }
+        if (cancelSolicitado) {
+            throw java.util.concurrent.CancellationException("cancelada")
+        }
+        if (audio.isEmpty()) throw IllegalStateException("No se pudo leer audio del archivo")
+
+        _uiState.value = TranscribeUiState.Working("Transcribiendo en el dispositivo…", 0)
+        return withContext(Dispatchers.Default) {
+            if (cancelSolicitado) {
+                throw java.util.concurrent.CancellationException("cancelada")
+            }
+            transcriber.loadModel(modelPath, model)
+            if (cancelSolicitado) {
+                throw java.util.concurrent.CancellationException("cancelada")
+            }
+            transcriber.transcribe(audio, lang) { pct ->
+                _uiState.value = TranscribeUiState.Working(
+                    "Transcribiendo en el dispositivo…", pct
+                )
+            }
+        }
+    }
+
+    private suspend fun transcribirPorBloques(
+        appContext: Context,
+        uri: Uri,
+        modelPath: String,
+        model: String,
+        lang: String?,
+        durationMs: Long
+    ): TranscriptionResult {
+        require(durationMs > 0)
+        withContext(Dispatchers.Default) {
+            transcriber.loadModel(modelPath, model)
+        }
+        val stepMs = CHUNK_MS - OVERLAP_MS
+        val totalChunks = maxOf(
+            1,
+            ceil(maxOf(0L, durationMs - OVERLAP_MS).toDouble() / stepMs).toInt()
+        )
+        val merged = mutableListOf<TranscriptionSegment>()
+        var chunkIndex = 0
+        var startMs = 0L
+
+        while (startMs < durationMs) {
+            if (cancelSolicitado) {
+                throw java.util.concurrent.CancellationException("cancelada")
+            }
+            val endMs = minOf(durationMs, startMs + CHUNK_MS)
+            val basePct = ((chunkIndex.toDouble() / totalChunks) * 100).toInt()
+            _uiState.value = TranscribeUiState.Working(
+                "Procesando bloque ${chunkIndex + 1}/$totalChunks…", basePct
+            )
+            val audio = withContext(Dispatchers.IO) {
+                AudioDecoder.decodeRange(
+                    appContext, uri, startMs, endMs
+                ) { cancelSolicitado }
+            }
+            if (audio.isEmpty()) {
+                throw IllegalStateException(
+                    "No se pudo leer el bloque ${chunkIndex + 1} del audio"
+                )
+            }
+            val currentIndex = chunkIndex
+            val result = withContext(Dispatchers.Default) {
+                transcriber.transcribe(audio, lang) { localPct ->
+                    val overall = (((currentIndex + localPct / 100.0) /
+                        totalChunks.toDouble()) * 100.0).toInt().coerceIn(0, 100)
+                    _uiState.value = TranscribeUiState.Working(
+                        "Transcribiendo bloque ${currentIndex + 1}/$totalChunks…",
+                        overall
+                    )
+                }
+            }
+
+            val cutMs = if (chunkIndex == 0) Long.MIN_VALUE else startMs + OVERLAP_MS / 2
+            if (chunkIndex > 0) {
+                merged.removeAll { segmentMidpoint(it) >= cutMs }
+            }
+            for (segment in result.segments) {
+                val shifted = shiftSegment(segment, startMs)
+                if (segmentMidpoint(shifted) >= cutMs) {
+                    merged += shifted
+                }
+            }
+
+            if (endMs >= durationMs) break
+            chunkIndex += 1
+            startMs += stepMs
+        }
+
+        merged.sortBy { it.startMs }
+        val text = merged.joinToString(" ") { it.text.trim() }
+            .replace(Regex("\\s+"), " ")
+            .trim()
+        _uiState.value = TranscribeUiState.Working(
+            "Uniendo bloques…", 100
+        )
+        return TranscriptionResult(text, merged)
+    }
+
+    private fun segmentMidpoint(segment: TranscriptionSegment): Long =
+        segment.startMs + (segment.endMs - segment.startMs).coerceAtLeast(0L) / 2
+
+    private fun shiftSegment(segment: TranscriptionSegment, offsetMs: Long): TranscriptionSegment =
+        segment.copy(
+            startMs = segment.startMs + offsetMs,
+            endMs = segment.endMs + offsetMs,
+            words = segment.words.map { word ->
+                word.copy(
+                    startMs = word.startMs?.plus(offsetMs),
+                    endMs = word.endMs?.plus(offsetMs)
+                )
+            }
+        )
+
     fun cancelar() {
         if (!isWorking) return
         cancelSolicitado = true
@@ -175,7 +285,6 @@ class TranscribeViewModel : ViewModel() {
         _uiState.value = TranscribeUiState.Working("Cancelando…", null)
     }
 
-    /** Conserva una edición humana separada del texto original del motor. */
     fun actualizarTextoEditado(appContext: Context, texto: String) {
         val estado = _uiState.value as? TranscribeUiState.Done ?: return
         val editado = texto.takeIf { it != estado.text }
@@ -184,18 +293,13 @@ class TranscribeViewModel : ViewModel() {
         guardadoEditado = viewModelScope.launch(Dispatchers.IO) {
             delay(250)
             TranscriptionStore.save(
-                appContext,
-                estado.text,
-                editado,
+                appContext, estado.text, editado,
                 estado.sourceName ?: ultimoOrigen,
-                ultimoModelo,
-                ultimoIdioma,
-                estado.segments
+                ultimoModelo, ultimoIdioma, estado.segments
             )
         }
     }
 
-    /** Recupera el último documento si Android terminó el proceso. */
     fun restaurar(appContext: Context) {
         if (_uiState.value !is TranscribeUiState.Idle || isWorking) return
         viewModelScope.launch(Dispatchers.IO) {
@@ -204,16 +308,15 @@ class TranscribeViewModel : ViewModel() {
             ultimoIdioma = guardado.language
             ultimoOrigen = guardado.sourceName
             _uiState.value = TranscribeUiState.Done(
-                guardado.original,
-                guardado.edited,
-                guardado.sourceName,
-                guardado.segments
+                guardado.original, guardado.edited,
+                guardado.sourceName, guardado.segments
             )
         }
     }
 
     fun descartarEstadoFinal() {
-        if (_uiState.value is TranscribeUiState.Error || _uiState.value is TranscribeUiState.Cancelled) {
+        if (_uiState.value is TranscribeUiState.Error ||
+            _uiState.value is TranscribeUiState.Cancelled) {
             _uiState.value = TranscribeUiState.Idle
         }
     }
@@ -226,10 +329,6 @@ class TranscribeViewModel : ViewModel() {
 
     override fun onCleared() {
         super.onCleared()
-        // Transcriber.free() es @Synchronized: si una transcripcion sigue en
-        // curso, espera a que termine antes de liberar el contexto nativo.
-        // Se hace en un hilo aparte para que onCleared() (hilo principal)
-        // nunca se bloquee esperando.
         cancelSolicitado = true
         transcriber.requestAbort()
         Thread { transcriber.free() }.start()
