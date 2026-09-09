@@ -1,134 +1,125 @@
-# Transcriptor VtT — versión Android (APK nativo, 100 % offline)
+# Transcriptor VtT — versión Android
 
-App Android que transcribe audio a texto **en el propio teléfono**, sin enviar nada
-a internet. Usa [whisper.cpp](https://github.com/ggml-org/whisper.cpp) compilado de
-forma nativa. El modelo de voz se descarga **una sola vez** la primera vez que lo usas
-y luego funciona sin conexión.
+App Android ARM64 que transcribe audio a texto **en el propio teléfono** con `whisper.cpp`. El audio no se envía a una API de transcripción. El modelo se descarga una vez y luego puede utilizarse sin conexión.
 
-## Instalar sin Android Studio (recomendado)
+Android sigue siendo una aplicación distinta de VtT escritorio: **no incorpora diarización de hablantes**.
 
-No necesitas instalar nada de desarrollo. El APK lo construye GitHub Actions:
+## Instalar sin Android Studio
 
-1. En GitHub, abre la pestaña **Actions** → flujo **"Android APK"**.
-2. Entra a la ejecución más reciente que esté en verde y descarga el artefacto
-   **`TranscriptorVtT-debug-apk`** (es un `.zip` que contiene el `.apk`).
-   - También se adjunta a la *Release* `android-latest` cuando el flujo corre en la rama.
-3. Pasa el `.apk` a tu teléfono (cable, Drive, WhatsApp Web, etc.).
-4. Ábrelo en el teléfono y acepta **"Instalar apps de orígenes desconocidos"** cuando
-   te lo pida (es normal para apps fuera de Play Store).
+1. En GitHub abre **Actions → Android APK**.
+2. Entra a una ejecución verde y descarga `TranscriptorVtT-debug-apk`.
+3. Extrae `TranscriptorVtT.apk`, pásalo al teléfono y ábrelo.
+4. Android puede pedir autorización para instalar aplicaciones desde esa fuente porque el APK no proviene de Play Store.
 
-## Cómo se usa
+El workflow también mantiene una release rodante `android-latest`. Un release firmado con una clave propia solo se genera si el repositorio tiene configurados los secretos de firma.
 
-1. Elige **Modelo** (`tiny` rápido · `base` equilibrado · `small` más preciso).
-2. Elige **Idioma** (Español, Inglés… o Detección automática).
-3. Toca **Seleccionar audio** y escoge un archivo (mp3, m4a, wav, ogg, mp4…), o
-   **comparte un audio/video desde otra app** (WhatsApp, Chrome, un gestor de
-   archivos…) eligiendo "Transcriptor VtT" en el menú Compartir.
-4. Toca **Transcribir**. La barra de progreso muestra el avance real; puedes
-   **Cancelar** en cualquier momento.
-   - La **primera vez con cada modelo** se descarga el modelo (necesita internet).
-   - Después transcribe **offline**.
-5. **Copia**, **guarda como .txt**, **guarda como .srt con tiempos** o **comparte**
-   el texto resultante. El `.txt` se guarda ajustado a ~100 caracteres por línea,
-   igual que en la versión de PC. El `.srt` usa los segmentos temporales devueltos
-   por whisper.cpp.
+## Uso
 
-El último documento se conserva en el almacenamiento interno de la aplicación, junto
-con el texto original y tus correcciones. Si Android termina el proceso, se recupera
-al volver a abrir la app. Las correcciones se mantienen separadas del reconocimiento
-original. El respaldo automático de Android está desactivado para evitar que el
-contenido de trabajo termine en un respaldo no elegido.
+1. Elige modelo: `tiny`, `base` o `small`.
+2. Elige idioma o detección automática.
+3. Selecciona un audio/video o compártelo desde otra app mediante el menú Compartir.
+4. Pulsa **Transcribir**. Se muestra progreso y puedes cancelar.
+5. Copia, edita, guarda TXT/SRT o comparte el resultado.
 
-> Sugerencia: en el teléfono, empieza con el modelo `tiny` o `base`. `small` es más
-> preciso pero más lento y pesado; conviene en equipos con buena RAM.
+El último documento se conserva en el almacenamiento interno de la app, con el texto reconocido y las correcciones humanas separados. El respaldo automático de Android está desactivado.
 
-> Puedes rotar la pantalla o cambiar de app durante una transcripción larga: el
-> trabajo sigue en curso y el resultado te espera al volver.
+## Modelos y seguridad de la primera descarga
 
-> Si una descarga de modelo se corta (se cierra la app, se pierde la conexión),
-> la próxima vez **reanuda desde donde quedó** en vez de bajarlo de nuevo. Si el
-> archivo terminó corrupto, se detecta solo y se vuelve a descargar.
+Fuente: `ggerganov/whisper.cpp` en Hugging Face.
 
-## Tamaño de los modelos (se bajan una vez)
+| Modelo | Tamaño aprox. | Uso orientativo |
+|---|---:|---|
+| tiny | ~75 MB | máxima velocidad |
+| base | ~142 MB | equilibrio |
+| small | ~466 MB | mayor precisión/costo |
 
-| Modelo | Tamaño aprox. | Velocidad | Precisión |
-|--------|---------------|-----------|-----------|
-| tiny   | ~75 MB        | muy rápida | básica    |
-| base   | ~142 MB       | rápida     | buena     |
-| small  | ~466 MB       | media      | mejor     |
+`ModelManager` descarga a `.part`, reanuda mediante `Range` cuando corresponde y valida `Content-Range` antes de anexar. Desde septiembre de 2026, el archivo completo debe coincidir además con el SHA-256 esperado antes de ser promovido a modelo válido:
 
-## Compilar localmente (opcional, si tienes Android Studio)
-
-1. Abre la carpeta `android/` en Android Studio (Giraffe o superior, JDK 17).
-2. Acepta instalar el **NDK 26.3.11579264** y **CMake 3.22.1** cuando lo pida.
-3. `Run` ▶ con el teléfono conectado, o `Build > Build APK(s)`.
-
-La primera compilación descarga whisper.cpp (vía CMake `FetchContent`) y compila la
-parte nativa; puede tardar varios minutos. El código nativo está fijado al commit
-`8a9ad7844d6e2a10cddf4b92de4089d7ac2b14a9`, que corresponde al tag oficial
-`v1.7.4` verificado el 9 de septiembre de 2026. Actualizar whisper.cpp requiere cambiar
-ese SHA explícitamente y volver a ejecutar la CI Android.
-
-## Firmar un APK de release (opcional)
-
-El APK debug (el que usan los pasos de arriba) ya se puede instalar directamente;
-esto es solo para publicar un APK de **release** firmado con tu propia clave.
-
-1. Genera una clave una sola vez (guárdala en un lugar seguro, **no** en el repo):
-
-   ```sh
-   keytool -genkeypair -v -keystore release.jks -alias vtt \
-     -keyalg RSA -keysize 2048 -validity 10000 \
-     -storepass "TU_CLAVE_DE_ALMACEN" -keypass "TU_CLAVE_DE_LLAVE" \
-     -dname "CN=Tu Nombre, OU=, O=, L=, S=, C=CL"
-   ```
-
-2. En GitHub, ve a **Settings → Secrets and variables → Actions** del repositorio
-   y agrega 4 *secrets*:
-
-   | Secret | Valor |
-   |---|---|
-   | `ANDROID_KEYSTORE_B64` | `base64 -w0 release.jks` (el archivo completo en base64) |
-   | `ANDROID_KEYSTORE_PASSWORD` | la clave de almacén (`-storepass`) |
-   | `ANDROID_KEY_ALIAS` | el alias (`vtt` en el ejemplo) |
-   | `ANDROID_KEY_PASSWORD` | la clave de la llave (`-keypass`) |
-
-3. El job **"Build signed release APK (opcional)"** del workflow "Android APK"
-   se activa solo cuando esos secrets existen y sube el artefacto
-   `TranscriptorVtT-release-apk`.
-
-Para compilar el release firmado en tu equipo, crea `android/keystore.properties`
-(no se versiona) con:
-
-```properties
-storeFile=release.jks
-storePassword=TU_CLAVE_DE_ALMACEN
-keyAlias=vtt
-keyPassword=TU_CLAVE_DE_LLAVE
+```text
+tiny  be07e048e1e599ad46341c8d2a135645097a538221678b7acdd1b1919c6e1b21
+base  60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe
+small 1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b
 ```
 
-y ejecuta `./gradlew assembleRelease` en `android/`. Sin ese archivo, `assembleRelease`
-compila sin firma personalizada.
+Los sidecars `.size` y `.sha256` se conservan como caché/integridad local, pero ya no son la única confianza de la primera descarga. Un modelo antiguo que no coincide con el catálogo se descarta y se descarga nuevamente.
+
+## Audios largos: procesamiento acotado por bloques
+
+Para archivos de más de **5 minutos**, la app evita construir el PCM completo de varias horas en memoria.
+
+Flujo actual:
+
+- ventanas de 90 segundos;
+- 2 segundos de solapamiento;
+- `AudioDecoder.decodeRange()` usa `MediaExtractor.seekTo()` y recorta los buffers según `presentationTimeUs`;
+- cada bloque se convierte a PCM mono 16 kHz y se libera antes de continuar;
+- timestamps de segmentos y palabras se trasladan a la línea temporal global;
+- el solapamiento se deduplica por el punto medio de los segmentos;
+- el modelo whisper se reutiliza entre bloques;
+- progreso y cancelación se mantienen.
+
+Esto reduce estructuralmente el riesgo de OOM por PCM largo. Sigue siendo necesario validar en teléfonos reales la calidad del empalme, memoria, batería y temperatura para audios extensos.
+
+## Ciclo de vida y JNI
+
+El trabajo vive en `TranscribeViewModel`, no en la Activity, por lo que una rotación de pantalla no cancela por sí sola la transcripción.
+
+`Transcriber` sincroniza carga/transcripción/liberación. La cancelación nativa usa `abort_callback`.
+
+El JNI ya no expone un puntero crudo que deba dejarse filtrado para evitar una carrera. `whisper_jni.cpp` usa:
+
+- identificadores `jlong` opacos;
+- registro protegido por mutex;
+- `shared_ptr<Handle>` para mantener vivo el handle mientras una llamada concurrente lo usa;
+- mutex separado para la vida de `whisper_context`;
+- bandera atómica de aborto que no necesita esperar el mutex de transcripción.
+
+`nativeFree` retira el handle del registro, solicita aborto, espera de forma segura el contexto y libera tanto `whisper_context` como el Handle cuando ya no existen referencias concurrentes.
+
+## Compilar localmente
+
+1. Abre `android/` en Android Studio con JDK 17.
+2. Instala NDK `26.3.11579264` y CMake `3.22.1`.
+3. Ejecuta la aplicación o `assembleDebug`.
+
+whisper.cpp está fijado al commit exacto `8a9ad7844d6e2a10cddf4b92de4089d7ac2b14a9`, correspondiente al tag `v1.7.4` verificado en la auditoría del proyecto. No cambiar ese pin sin volver a compilar la matriz Android.
+
+La ABI actual es únicamente `arm64-v8a`; ampliar ABI requiere validar de nuevo tamaño, rendimiento y CI.
+
+## Firmar un APK de release
+
+El APK debug puede instalarse directamente. Para un release firmado configura los secretos:
+
+- `ANDROID_KEYSTORE_B64`
+- `ANDROID_KEYSTORE_PASSWORD`
+- `ANDROID_KEY_ALIAS`
+- `ANDROID_KEY_PASSWORD`
+
+El job opcional construye el release, verifica la firma con `apksigner`, genera `.sha256` y limpia el material de firma del runner. Sin keystore el job se omite de forma explícita y no convierte el build debug en fallo.
+
+Consulta `RELEASE_SETUP.md` antes de distribuir una actualización firmada.
 
 ## Detalles técnicos
 
-- Núcleo nativo: `whisper.cpp` commit `8a9ad7844d6e2a10cddf4b92de4089d7ac2b14a9`
-  (release/tag `v1.7.4`), compilado con NDK para `arm64-v8a`.
-- Puente JNI: `app/src/main/cpp/whisper_jni.cpp` ↔ `WhisperBridge.kt`; progreso real
-  mediante `progress_callback` y cancelación mediante `abort_callback`.
-- El trabajo de transcripción vive en `TranscribeViewModel` (`viewModelScope`),
-  no en la Activity: sobrevive a la rotación de pantalla.
-- Decodificación con `MediaCodec`/`MediaExtractor` → PCM mono 16 kHz.
-- Límite actual: la decodificación conserva el audio completo en memoria; archivos de
-  varias horas pueden agotar la RAM. La app avisa para audios largos y captura OOM,
-  pero el procesamiento incremental por bloques sigue pendiente.
-- Modelos GGML descargados de Hugging Face (`ggerganov/whisper.cpp`). Se reanudan con
-  `Range` cuando es posible y quedan protegidos contra corrupción posterior mediante
-  tamaño y SHA-256 local. Ese hash no autentica la primera descarga.
-- Sin permisos de almacenamiento: usa SAF. `INTERNET`/estado de red se usan para la
-  descarga del modelo.
-- Icono propio: micrófono blanco sobre violeta `#6C4DF2`.
-- **Android no incorpora actualmente la diarización V5.1 del escritorio.**
+- `MediaCodec` / `MediaExtractor` → PCM mono 16 kHz.
+- whisper.cpp nativo, ARM64.
+- progreso mediante `progress_callback`.
+- cancelación mediante `abort_callback`.
+- SAF: no requiere permisos generales de almacenamiento.
+- `INTERNET` se utiliza para la primera descarga del modelo.
+- Actions del workflow se fijan por SHA.
 
-> Nota: se compila únicamente para `arm64-v8a`. Para soportar otras ABI hay que cambiar
-> `abiFilters` y validar de nuevo tamaño, rendimiento y CI.
+## Verificación pendiente que CI no sustituye
+
+Aunque el APK compila en CI, todavía deben comprobarse en un teléfono físico:
+
+- instalación/apertura del APK actual;
+- reanudación real de una descarga interrumpida;
+- modo avión después de descargar el modelo;
+- rotación/fondo/cancelación;
+- ACTION_SEND/ACTION_VIEW;
+- audio largo por bloques, especialmente los empalmes de 2 s;
+- memoria, batería y temperatura en 10, 60 y >90 minutos;
+- flujo de actualización de un APK firmado.
+
+Estas pruebas se registran en `../PRUEBAS_MANUALES.md`.
