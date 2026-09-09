@@ -21,10 +21,11 @@ Estado: **V5.2 implementado, probado y empaquetado**.
 - Reutilización de modelos, motor, PCM y embeddings.
 - Identidad rival-aware y sonda barata antes del escaneo detallado de turnos largos.
 - Conteos separados de sherpa / identidad / texto.
+- Métricas de identidad separadas en etapa final, evaluaciones ligeras y total acumulado.
 - JSON maestro schema v7.
 - Modelos sherpa protegidos por hashes auditados fijados en código.
-- `Desktop checks` final: verde en Windows/macOS/Ubuntu.
-- `Desktop executables #7`: verde en Windows/macOS/Ubuntu.
+- `Desktop checks #69`: verde en Windows/macOS/Ubuntu.
+- `Desktop executables #8`: verde en Windows/macOS/Ubuntu.
 
 ### Android
 
@@ -100,6 +101,16 @@ Para >5 min se usa `decodeRange()` y ventanas de 90 s con 2 s de solapamiento. L
 
 El JNI usa identificadores opacos y registro `shared_ptr`; `nativeFree` puede retirar/liberar el Handle sin reintroducir use-after-free.
 
+### V52-13 [CORREGIDO EN CIERRE] `identity_wall_seconds` podía subcontar trabajo identity-aware
+
+El tiempo total de diarización ya incluía todas las operaciones, pero la métrica específica `identity_wall_seconds` sumaba la etapa final y el precheck inicial, omitiendo evaluaciones ligeras adicionales usadas al comparar candidatos identity-aware. Se añadió `vtt_diarization_v52_metrics.py`, que acumula todas las invocaciones `_light_identity` y expone:
+
+- `final_stage_wall_seconds`;
+- `light_identity_wall_seconds`;
+- `total_wall_seconds`.
+
+`identity_wall_seconds` queda igualado al total acumulado. Se añadió regresión que simula dos evaluaciones ligeras y comprueba que no se pierden ni duplican tiempos. No cambia la lógica acústica ni la selección de hablantes.
+
 ## 4. Verificaciones reproducibles V5.2
 
 ### Smoke acústico
@@ -129,7 +140,7 @@ Las cuatro salidas tuvieron similitud textual 1.000 frente a medium/Preciso en e
 
 ### Desktop checks final
 
-`Desktop checks #65`, commit `d5d100e0c2a6f14c809ad022f84a6d1fd750ab64`: **success**. `py_compile` y `pytest` terminaron correctamente en Ubuntu, Windows y macOS. Ese commit contiene las correcciones funcionales V5.2 y las pruebas nuevas de integridad/migración; las modificaciones posteriores hasta el build final fueron documentación raíz y el trigger temporal de empaquetado.
+`Desktop checks #69`, run `34407637074`, commit `5d6ceece5b24a46cb1c25e269d1a175ddda025e3`: **success**. `py_compile` y `pytest` terminaron correctamente en Ubuntu, Windows y macOS. Esta ejecución incluye `vtt_diarization_v52_metrics.py` y las regresiones de contabilidad completa de identidad.
 
 ### Android final
 
@@ -142,14 +153,14 @@ Las cuatro salidas tuvieron similitud textual 1.000 frente a medium/Preciso en e
 
 ### PyInstaller V5.2 final
 
-`Desktop executables #7`, run `34406483435`, commit de build `9e6ec19bd6216362b5527ca2c00305d0c61cdfe4`: **success** en Windows, Ubuntu y macOS.
+`Desktop executables #8`, run `34407796151`, commit de build `5b2703d44f5196aa70769ae54ae6d945dab90d26`: **success** en Windows, Ubuntu y macOS.
 
 Artefactos:
 
 ```text
-Windows  126.867.250 bytes  sha256:9efe1bc984b0a61113e66572223c030e14a7b4715886b58f99ec2eaa72098378
-Ubuntu   186.194.079 bytes  sha256:3a01c815bef01f9f9a18164f7a1ff4a931bc260455b3e25135487c8b6a13e94e
-macOS    198.797.590 bytes  sha256:c196761fe65e6617d790c746863fb03369422f4deda2f31b25f24d81e415356b
+Windows  126.869.051 bytes  sha256:6d949ec154ed831631f99bf865c75a7261ade18ba546dfccd78ad828d6be8438
+Ubuntu   186.195.924 bytes  sha256:3c38cc9f16e67fc919d41bc0d560b8d310e662528a65336c28d4175843594e9d
+macOS    198.803.581 bytes  sha256:9f495afc5e0f11cac65fb188f5aa5764ceaa15324fe53ea6ab375b303f4f2890
 ```
 
 Expiran el 8 de diciembre de 2026.
@@ -159,11 +170,12 @@ Expiran el 8 de diciembre de 2026.
 - workflow temporal acústico/hash/benchmark: eliminado;
 - trigger temporal de `desktop-build.yml`: retirado;
 - `desktop-build.yml` restaurado exactamente al blob permanente `93d5121a6ec87c3fa05a9fff238749a567e479dc`, con `workflow_dispatch` como único disparador;
+- el árbol final conserva únicamente `android-build.yml`, `desktop-build.yml` y `desktop-check.yml` dentro de `.github/workflows`;
 - no quedan archivos temporales de validación en `.github/workflows`.
 
 ## 5. Límites que permanecen
 
-No quedan como deuda de código los antiguos pendientes de bloques Android, pins de Actions, hashes esperados Android ni fuga del Handle JNI.
+No quedan como deuda de código los antiguos pendientes de bloques Android, pins de Actions, hashes esperados Android, fuga del Handle JNI ni contabilidad incompleta de tiempos de identidad.
 
 Requieren prueba externa/manual:
 
