@@ -21,9 +21,10 @@ VtT ofrece transcripción local y privada en escritorio Windows/macOS/Linux y An
 - worker persistente y reutilización de PCM/embeddings.
 - sonda de turnos largos antes del escaneo detallado.
 - conteos sherpa / identidad / texto separados.
+- contabilidad de identidad separa etapa final, evaluaciones ligeras y total acumulado.
 - JSON schema v7 y DOCX diagnóstico.
 - modelos sherpa con tamaño y SHA-256 auditado fijado en código.
-- Desktop checks y PyInstaller V5.2 verdes en Windows/macOS/Ubuntu.
+- `Desktop checks #69` y `Desktop executables #8` verdes en Windows/macOS/Ubuntu.
 
 ### Android
 
@@ -78,6 +79,7 @@ Cerrado:
 - sonda barata para turnos largos;
 - reutilización PCM/embeddings;
 - conteos separados;
+- contabilidad completa de tiempo de identidad, incluidas evaluaciones ligeras;
 - JSON schema v7;
 - modos globales/presupuesto de rendimiento;
 - benchmark ASR reproducible;
@@ -97,7 +99,7 @@ Cerrado:
 
 ### Desktop checks
 
-`Desktop checks #65` sobre `d5d100e0c2a6f14c809ad022f84a6d1fd750ab64`: Windows/macOS/Ubuntu **success**.
+`Desktop checks #69`, run `34407637074`, sobre `5d6ceece5b24a46cb1c25e269d1a175ddda025e3`: Windows/macOS/Ubuntu **success**. Incluye la regresión que verifica la suma de todas las llamadas ligeras de identidad y el nuevo módulo `vtt_diarization_v52_metrics.py` en `py_compile`.
 
 ### Smoke V5.2
 
@@ -124,9 +126,9 @@ Las cuatro combinaciones de `benchmark_asr.py` ejecutaron sobre `jfk.flac`. No e
 
 ### PyInstaller V5.2
 
-`Desktop executables #7`, run `34406483435`, commit `9e6ec19bd6216362b5527ca2c00305d0c61cdfe4`: Windows/macOS/Ubuntu **success**.
+`Desktop executables #8`, run `34407796151`, commit `5b2703d44f5196aa70769ae54ae6d945dab90d26`: Windows/macOS/Ubuntu **success**.
 
-El trigger temporal se retiró y `desktop-build.yml` volvió a `workflow_dispatch` únicamente.
+El trigger temporal se retiró y `desktop-build.yml` volvió exactamente al blob permanente `93d5121a6ec87c3fa05a9fff238749a567e479dc`, con `workflow_dispatch` como único disparador.
 
 ## 6. Pendientes sin necesidad de modificar código ahora
 
