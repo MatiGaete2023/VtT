@@ -49,6 +49,9 @@ jobs:
           vtt_reporting_v5.py vtt_validation.py vtt_pipeline_v5.py
           vtt_identity.py vtt_diarization_v51.py vtt_diarization_service_v51.py
           vtt_validation_v51.py vtt_reporting_v51.py vtt_pipeline_v51.py vtt_ui_v51.py
+          vtt_identity_v52.py vtt_diarization_v52.py vtt_diarization_service_v52.py
+          vtt_validation_v52.py vtt_reporting_v52.py vtt_performance.py
+          vtt_pipeline_v52.py vtt_ui_v52.py benchmark_asr.py
           vtt_main.py run.py
 
       - name: Instalar dependencias de pruebas
