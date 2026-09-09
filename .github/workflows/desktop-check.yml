@@ -47,10 +47,12 @@ jobs:
           vtt_pipeline.py vtt_pipeline_v4.py
           vtt_alignment.py vtt_diarization_v5.py vtt_diarization_service.py
           vtt_reporting_v5.py vtt_validation.py vtt_pipeline_v5.py
+          vtt_identity.py vtt_diarization_v51.py vtt_diarization_service_v51.py
+          vtt_validation_v51.py vtt_reporting_v51.py vtt_pipeline_v51.py vtt_ui_v51.py
           vtt_main.py run.py
 
       - name: Instalar dependencias de pruebas
-        run: python -m pip install --upgrade pip pytest python-docx
+        run: python -m pip install --upgrade pip pytest python-docx numpy
 
       - name: Ejecutar pruebas
         working-directory: desktop
