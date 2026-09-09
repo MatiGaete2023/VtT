@@ -8,28 +8,31 @@ import java.net.URL
 import java.security.MessageDigest
 
 /**
- * Gestiona la descarga (una sola vez) y el almacenamiento de los modelos GGML
- * de whisper.cpp. Una vez descargado, el modelo queda en el equipo y se usa
- * sin conexion.
+ * Gestiona la descarga y almacenamiento de modelos GGML de whisper.cpp.
  *
- * Verificacion de integridad local: se guardan el tamano y SHA-256 del archivo
- * terminado en sidecars junto al modelo. Esto detecta truncamiento o corrupcion
- * posterior en el almacenamiento. No sustituye un hash esperado publicado por
- * una fuente confiable para autenticar la primera descarga.
+ * Desde septiembre de 2026 tiny/base/small se validan contra SHA-256 esperados
+ * publicados por el repositorio oficial ggerganov/whisper.cpp en Hugging Face.
+ * Los sidecars locales se mantienen para cachear/verificar integridad, pero ya
+ * no constituyen la unica confianza de la primera descarga.
  */
 object ModelManager {
 
     private val hashesVerificados = mutableMapOf<String, Pair<Long, Long>>()
 
-    // Modelos multilingue oficiales de whisper.cpp publicados en Hugging Face.
     private const val BASE_URL =
         "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/"
 
-    // Etiqueta visible -> nombre del modelo. tiny es el mas liviano (~75 MB),
-    // small el mas preciso de la lista (~466 MB).
     val MODELS = listOf("tiny", "base", "small")
 
+    /** SHA-256 de los blobs GGML multilingües que descarga esta app. */
+    private val EXPECTED_SHA256 = mapOf(
+        "tiny" to "be07e048e1e599ad46341c8d2a135645097a538221678b7acdd1b1919c6e1b21",
+        "base" to "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe",
+        "small" to "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b"
+    )
+
     fun modelFile(context: Context, model: String): File {
+        require(model in MODELS) { "Modelo no soportado: $model" }
         val dir = File(context.filesDir, "models").apply { mkdirs() }
         return File(dir, "ggml-$model.bin")
     }
@@ -44,54 +47,49 @@ object ModelManager {
         File(modelFile(context, model).parentFile, "ggml-$model.bin.part")
 
     fun isDownloaded(context: Context, model: String): Boolean {
+        if (model !in MODELS) return false
         val f = modelFile(context, model)
         if (!f.exists()) return false
         val sf = sizeFile(context, model)
-        val esperado = sf.takeIf { it.exists() }?.readText()?.trim()?.toLongOrNull()
-        if (esperado != null && f.length() != esperado) return false
-        if (esperado == null && f.length() <= 1_000_000L) return false
+        val esperadoTamano = sf.takeIf { it.exists() }?.readText()?.trim()?.toLongOrNull()
+        if (esperadoTamano != null && f.length() != esperadoTamano) return false
+        if (esperadoTamano == null && f.length() <= 1_000_000L) return false
 
-        val hf = hashFile(context, model)
-        val hashEsperado = hf.takeIf { it.exists() }?.readText()?.trim()?.lowercase()
+        val sourceHash = EXPECTED_SHA256[model]
+            ?: return false // MODELS y catálogo deben mantenerse sincronizados.
         val firma = f.length() to f.lastModified()
-        if (hashEsperado != null) {
-            val ruta = f.absolutePath
-            synchronized(hashesVerificados) {
-                if (hashesVerificados[ruta] == firma) return true
-            }
-            val hashActual = try { sha256(f) } catch (_: Exception) { return false }
-            if (hashEsperado != hashActual) return false
-            synchronized(hashesVerificados) { hashesVerificados[ruta] = firma }
-            return true
+        val ruta = f.absolutePath
+        synchronized(hashesVerificados) {
+            if (hashesVerificados[ruta] == firma) return true
         }
 
-        val hashActual = try { sha256(f) } catch (_: Exception) { return false }
+        val actual = try { sha256(f) } catch (_: Exception) { return false }
+        if (actual != sourceHash) return false
 
-        // Migra modelos antiguos: desde ahora quedan protegidos también
-        // contra corrupción silenciosa posterior a la descarga.
-        if (esperado == null) sf.writeText(f.length().toString())
-        hf.writeText(hashActual)
-        synchronized(hashesVerificados) { hashesVerificados[f.absolutePath] = firma }
+        // Repara/migra sidecars antiguos solo después de autenticar contra el
+        // hash esperado de origen.
+        if (esperadoTamano == null) sf.writeText(f.length().toString())
+        val hf = hashFile(context, model)
+        if (!hf.exists() || hf.readText().trim().lowercase() != sourceHash) {
+            hf.writeText(sourceHash)
+        }
+        synchronized(hashesVerificados) { hashesVerificados[ruta] = firma }
         return true
     }
 
-    /**
-     * Garantiza que el modelo este disponible localmente. Si falta o esta
-     * corrupto, lo descarga (reanudando una descarga interrumpida si es
-     * posible) informando el avance (0..100). Devuelve el archivo del modelo.
-     */
     fun ensureModel(
         context: Context,
         model: String,
         isCancelled: () -> Boolean = { false },
         onProgress: (Int) -> Unit
     ): File {
+        require(model in MODELS) { "Modelo no soportado: $model" }
         val target = modelFile(context, model)
         if (isDownloaded(context, model)) return target
 
-        // Un archivo final presente pero que no paso isDownloaded() esta
-        // corrupto/truncado: se descarta antes de reintentar.
         if (target.exists()) target.delete()
+        hashFile(context, model).delete()
+        sizeFile(context, model).delete()
 
         val tmp = partFile(context, model)
         val url = URL(BASE_URL + "ggml-$model.bin")
@@ -103,8 +101,6 @@ object ModelManager {
             conn.connect()
             var reanudando = existentes > 0L
             if (reanudando && conn.responseCode != HttpURLConnection.HTTP_PARTIAL) {
-                // El servidor no soporto reanudar: se descarta lo parcial y
-                // se reintenta desde cero con una conexion nueva.
                 conn.disconnect()
                 tmp.delete()
                 existentes = 0L
@@ -119,8 +115,6 @@ object ModelManager {
             if (reanudando) {
                 val inicio = inicioContentRange(conn.getHeaderField("Content-Range"))
                 if (inicio != existentes) {
-                    // Nunca anexar bytes si el servidor respondió un rango
-                    // distinto del solicitado: se reinicia de forma segura.
                     conn.disconnect()
                     tmp.delete()
                     existentes = 0L
@@ -171,17 +165,25 @@ object ModelManager {
 
         val tamanoFinal = tmp.length()
         if (totalEsperado > 0 && tamanoFinal != totalEsperado) {
+            tmp.delete()
             throw IOException(
                 "Descarga incompleta: se recibieron $tamanoFinal de $totalEsperado bytes"
             )
         }
         val hashFinal = sha256(tmp)
+        val hashEsperado = EXPECTED_SHA256.getValue(model)
+        if (hashFinal != hashEsperado) {
+            tmp.delete()
+            throw IOException(
+                "SHA-256 inválido para '$model'. La descarga no coincide con el modelo oficial esperado."
+            )
+        }
         if (!tmp.renameTo(target)) {
             tmp.copyTo(target, overwrite = true)
             tmp.delete()
         }
         sizeFile(context, model).writeText(tamanoFinal.toString())
-        hashFile(context, model).writeText(hashFinal)
+        hashFile(context, model).writeText(hashEsperado)
         synchronized(hashesVerificados) {
             hashesVerificados[target.absolutePath] = target.length() to target.lastModified()
         }
