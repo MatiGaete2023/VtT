@@ -1,207 +1,155 @@
-# AUDITORÍA DEL REPOSITORIO — VtT
+# AUDITORÍA DEL REPOSITORIO — VtT V5.2
 
-**Actualizada y cerrada:** 9 de septiembre de 2026  
-**Rama auditada:** `claude/voice-transcriber-multiplatform-6xifq1`  
-**Base funcional V5.1 al iniciar esta revisión:** `aa1b8d8b5407869d55225c46bf3b199d00b72e3d`
+**Actualizada:** 9 de septiembre de 2026  
+**Rama:** `claude/voice-transcriber-multiplatform-6xifq1`
 
-Esta auditoría sustituye la revisión antigua de julio. Los defectos ya corregidos se separan de los límites que permanecen abiertos; las pruebas automatizadas y de empaquetado ejecutadas en el cierre se registran al final.
+Esta auditoría registra el estado V5.2-performance y distingue lo comprobado por código/CI de lo que todavía necesita audio o hardware real.
 
 ## 1. Estado ejecutivo
 
 ### Escritorio
 
-Estado: **funcional y modularizado, V5.1**.
+Estado: **V5.2 implementado y modularizado**.
 
-- Python mínimo real: **3.9+**.
-- Entry point: `desktop/vtt_main.py`.
-- ASR: `faster-whisper` / CTranslate2.
-- Diarización: `sherpa-onnx`, perfiles Rápida/Equilibrada/Precisa.
-- Auto estructural, worker persistente, alineación por palabra y división por cambio de voz.
-- V5.1 añade verificación acústica conservadora de identidad, escaneo local acotado y confianza por identidad.
-- JSON maestro: **schema v6**.
-- CI de escritorio: `py_compile + pytest` en Windows/macOS/Ubuntu.
-- PyInstaller V5.1 verificado en Windows/macOS/Ubuntu.
+- Python 3.9+.
+- Entry point `desktop/vtt_main.py`.
+- ASR: faster-whisper/CTranslate2.
+- Diarización: sherpa-onnx.
+- Modos globales Rápido/Equilibrado/Preciso/Personalizado.
+- Auto estructural + precheck acústico acotado + selección identity-aware.
+- Reutilización de modelos, motor, PCM y embeddings.
+- Identidad rival-aware y sonda barata antes del escaneo detallado de turnos largos.
+- Conteos separados de sherpa / identidad / texto.
+- JSON maestro schema v7.
+- Modelos sherpa protegidos por hashes auditados fijados en código.
 
 ### Android
 
-Estado: **funcional para ASR local; no tiene diarización V5.1**.
+Estado: **ASR local funcional; sin diarización del escritorio**.
 
-- Kotlin + whisper.cpp/JNI.
-- `minSdk 24`, ARM64.
-- Progreso y cancelación nativa.
-- El trabajo vive en `TranscribeViewModel`; `Transcriber` sincroniza carga/transcripción/liberación.
-- Admite ACTION_SEND/ACTION_VIEW para audio y video.
-- TXT/SRT, persistencia del último documento y texto editado separado del original.
-- Descargas de modelo reanudables y protección de integridad local por tamaño + SHA-256 calculado tras la descarga.
-- whisper.cpp fijado al commit exacto `8a9ad7844d6e2a10cddf4b92de4089d7ac2b14a9` (tag oficial v1.7.4 verificado al cierre).
-- Workflow Android con permisos reducidos por job y limpieza explícita del material de firma temporal.
+- Kotlin + whisper.cpp/JNI, ARM64, minSdk 24.
+- Progreso/cancelación nativa y trabajo en `TranscribeViewModel`.
+- Modelos tiny/base/small con SHA-256 esperado antes de aceptar la primera descarga.
+- Audios >5 min por bloques de 90 s + 2 s de solapamiento.
+- JNI con handles opacos/shared_ptr; eliminada la fuga deliberada anterior.
+- whisper.cpp fijado al commit `8a9ad7844d6e2a10cddf4b92de4089d7ac2b14a9`.
 
-## 2. Hallazgos antiguos que ya están corregidos
+## 2. Hallazgos históricos corregidos
 
-### [CORREGIDO] Captura de audio del sistema en Windows
+Continúan cerrados los defectos de captura de sistema Windows, pérdida de temporales, reinstalación de dependencias, bloqueo de Tk durante instalaciones, cierre inseguro del WAV, fallo silencioso de loopback, lectura de frecuencia, sobrescritura de exportaciones y ciclo de vida Android.
 
-La implementación actual usa `soundcard` para loopback WASAPI y mantiene `sounddevice` para micrófonos. Ya no depende de una supuesta `WasapiSettings(loopback=True)`.
+## 3. Hallazgos V5.2
 
-### [CORREGIDO] Pérdida de grabaciones/transcripciones temporales
+### V52-01 [CORREGIDO] Segunda pasada Auto demasiado cara
 
-Las grabaciones sin salida explícita usan almacenamiento persistente. Las transcripciones de medios descargados a un directorio temporal se redirigen a la carpeta persistente de transcripciones.
+En un caso real previo, la segunda pasada sherpa representó una fracción importante de la diarización total. V5.2 añade un precheck con presupuesto máximo de 18 embeddings y 3 por identidad. Si una sobredetección se consolida a una solución admisible, sin baja confianza y con penalización estructural acotada, evita la segunda pasada completa.
 
-### [CORREGIDO] Dependencias nuevas no detectadas por el venv
+Si el precheck no es concluyente, sherpa sigue siendo la autoridad y se ejecuta el reintento.
 
-`run.py` guarda el SHA-256 de `requirements.txt`, comprueba importabilidad y reinstala cuando cambia el archivo o falta un módulo. `--update`/`--repair` fuerzan reparación.
+### V52-02 [CORREGIDO] Selección de candidatos basada casi solo en estructura
 
-### [CORREGIDO] Instalación de dependencias de grabación congelando Tk
+Cuando dos candidatos Auto siguen ambiguos, V5.2 combina penalización estructural con consistencia acústica de identidad. La evidencia acústica complementa, no reemplaza, la diarización.
 
-La instalación bajo la aplicación se realiza mediante un hilo y la respuesta vuelve por la cola de UI. Un ejecutable congelado no intenta ejecutar `pip`.
+### V52-03 [CORREGIDO] Dos apariciones de una misma identidad podían pasar un umbral local y seguir siendo sospechosas
 
-### [CORREGIDO] Cierre inseguro del WAV
+La comparación considera ahora similitud entre ambas apariciones y si una identidad rival explica significativamente mejor una de ellas.
 
-El hilo escritor conserva referencias locales a cola/WAV, consume un centinela y es el único dueño del cierre del archivo. La UI no fuerza el cierre si el writer sigue vivo.
+### V52-04 [CORREGIDO] Similitud 1.00 engañosa con una sola muestra
 
-### [CORREGIDO] Fallo silencioso del loopback
+Una identidad con una muestra se informa como insuficiente. Con dos muestras se reporta similitud directa entre apariciones y rival máximo; con más muestras se usan estadísticas de prototipo.
 
-La captura `soundcard` encola `grabacion_error` si el hilo falla y la UI conserva el WAV parcial cuando es posible.
+### V52-05 [CORREGIDO] Escaneo de turnos largos pagaba el costo detallado demasiado pronto
 
-### [CORREGIDO] Frecuencia nativa descartada por consulta del host API
+Se ejecuta primero una sonda de tres ventanas. Solo los turnos heterogéneos pasan al escaneo detallado.
 
-La consulta descriptiva del host API está separada de la lectura de frecuencia/canales; un fallo descriptivo no pisa la frecuencia ya obtenida.
+### V52-06 [CORREGIDO] Conteo acústico y hablantes con texto se confundían
 
-### [CORREGIDO] Sobrescritura silenciosa de exportaciones
+Los reportes separan:
 
-La familia de archivos usa un tronco disponible y añade `(2)`, `(3)`, etc. si ya existe una salida.
+1. clusters sherpa seleccionados;
+2. clusters tras control de identidad;
+3. hablantes con texto alineado;
+4. clusters acústicos sin texto.
 
-### [CORREGIDO] Android use-after-free por rotación
+### V52-07 [CORREGIDO EN ESTA REVISIÓN] Migración de perfiles podía sobrescribir preferencias V5.1
 
-El trabajo está en `TranscribeViewModel`; `loadModel`, `transcribe` y `free` se sincronizan en `Transcriber`. `onCleared()` solicita aborto y libera en otro hilo.
+La primera implementación V5.2 interpretaba la ausencia de `global_profile` como Equilibrado y podía cambiar silenciosamente modelo/ASR/diarización. La migración ahora reconoce un preset solo si los tres controles restaurados coinciden exactamente; cualquier combinación propia queda en Personalizado.
 
-### [CORREGIDO] Android sin reanudación/integridad local de modelos
+### V52-08 [CORREGIDO] Integridad de modelos sherpa dependía de TOFU
 
-`ModelManager` usa `.part`, `Range`, valida `Content-Range`, conserva tamaño y SHA-256 local y detecta corrupción posterior.
+Los assets históricos de k2-fsa siguen mostrando `digest=null` en GitHub. Se descargaron dos veces desde los assets oficiales y los hashes coincidieron. VtT fija:
 
-## 3. Hallazgos V5.1
+```text
+segmentación archive  24615ee884c897d9d2ba09bb4d30da6bb1b15e685065962db5b02e76e4996488
+segmentación model    220ad67ca923bef2fa91f2390c786097bf305bceb5e261d4af67b38e938e1079
+embedding 3D-Speaker  1a331345f04805badbb495c775a6ddffcdd1a732567d5ec8b3d5749e3c7a5e4b
+```
 
-### A1. [CORREGIDO] Identidad no podía evaluarse solo por conteo
+Se valida tamaño + hash antes de promover la descarga y se valida también el ONNX extraído. Son pins auditados por VtT, no digests publicados por upstream.
 
-V5 podía estimar un número razonable de voces pero reutilizar una misma etiqueta para voces acústicamente incompatibles. V5.1 añade embeddings por turno y prototipos por identidad.
+### V52-09 [CORREGIDO] GitHub Actions antiguas advertían runtime Node 20 deprecado
 
-Medidas de seguridad:
+Los workflows relevantes se actualizaron a revisiones actuales fijadas por SHA, incluyendo checkout/setup-python/upload-artifact con runtime moderno. Se conserva el principio de no usar tags móviles como confianza final.
 
-- un turno breve no se fusiona solo por duración;
-- turnos largos no forman prototipos, porque pueden contener más de una voz;
-- la reasignación exige coincidencia suficiente con otra identidad y margen frente a rivales;
-- el escaneo local exige cambios sostenidos y está acotado para no repetir una diarización completa;
-- en modo manual se mide consistencia pero no se altera automáticamente el número solicitado.
+### V52-10 [CORREGIDO] Android: primera descarga de GGML no autenticada por catálogo
 
-### A2. [CORREGIDO] Prototipo contaminado por turno largo
+`ModelManager` contiene SHA-256 esperados para tiny/base/small y rechaza/promueve el archivo antes de convertirlo en modelo válido. Los sidecars locales quedan como mecanismo secundario.
 
-Durante la calibración se detectó que un turno largo con varias voces podía contaminar su propio prototipo y provocar reasignaciones inversas. Se corrigió excluyendo esos turnos de los prototipos y tratándolos solo como candidatos a escaneo local.
+### V52-11 [CORREGIDO] Android: PCM completo de audios largos
 
-### A3. [LIMITACIÓN DOCUMENTADA] Ground truth
+Para >5 min se usa `decodeRange()` y transcripción en ventanas de 90 s con 2 s de solapamiento. Se trasladan timestamps a la línea global y se deduplica el solape. La CI confirma compilación; la calidad de empalmes y consumo real siguen siendo pruebas de dispositivo.
 
-El número Auto es una estimación acústica. V5.1 no denomina ground truth a resultados automáticos. Los documentos marcan confianza estructural/de identidad y si existe o no ground truth externo.
+### V52-12 [CORREGIDO] Handle JNI deliberadamente filtrado
 
-### A4. [LIMITACIÓN DOCUMENTADA] Confianza nativa de sherpa 1.13.7
+El JNI usa identificadores opacos y un registro de `shared_ptr`. `nativeFree` puede retirar/liberar el Handle sin reintroducir use-after-free frente a `requestAbort`.
 
-La versión Python utilizada por VtT no expone `confidence` en `OfflineSpeakerDiarizationSegment`; por tanto no se inventa una métrica sherpa inexistente. La confianza V5.1 es una evaluación propia de consistencia de embeddings.
+## 4. Verificaciones reproducibles V5.2
 
-### A5. [LIMITACIÓN DOCUMENTADA] Timers internos sherpa en Windows
+### Smoke acústico
 
-La captura de `stderr` nativo no es fiable en todos los entornos Windows. VtT conserva siempre medición wall de `process()` y de cada pasada; cuando los timers internos se capturan, agrega segmentación/embeddings/clustering.
+Workflow temporal ejecutado dos veces y eliminado después.
 
-### A6. [PENDIENTE DE PRODUCTO] Android: audio largo completo en memoria
+Audios oficiales sherpa-onnx:
 
-`AudioDecoder.decode()` sigue construyendo el PCM completo y luego un `FloatArray` mono 16 kHz. Para archivos de varias horas existe riesgo de OOM. Actualmente:
+- 2 hablantes → 2 detectados;
+- 4 hablantes → 4 detectados;
+- una pasada en ambos ejemplos;
+- reutilización de modelos, motor y extractor comprobada en el segundo trabajo;
+- PCM de identidad reutilizado desde diarización.
 
-- se avisa para audio >90 min;
-- se captura `OutOfMemoryError` con un mensaje accionable.
+Esto es un smoke de conteo/reutilización, no DER/JER.
 
-Solución de fondo pendiente: decodificación/transcripción por bloques con solape y deduplicación temporal. No se implementó en esta auditoría porque cambia la semántica de timestamps/contexto y requiere pruebas en dispositivo físico.
+### Benchmark ASR público
 
-### A7. [CORREGIDO] whisper.cpp fijado por tag móvil
+Sobre `jfk.flac` de OpenAI, en el runner utilizado:
 
-CMake ya no obtiene whisper.cpp mediante el tag móvil `v1.7.4`. Se fijó al commit exacto `8a9ad7844d6e2a10cddf4b92de4089d7ac2b14a9`; Android CI confirmó que el pin compila.
+```text
+medium / Preciso      ~5.9 s · ~1.87x
+medium / Equilibrado  ~4.6 s · ~2.38x
+small  / Preciso      ~3.2 s · ~3.47x
+small  / Equilibrado  ~1.5 s · ~7.45x
+```
 
-### A8. [HARDENING PENDIENTE] GitHub Actions por tags mayores
+Las cuatro salidas tuvieron similitud textual 1.000 frente a medium/Preciso en esa muestra corta. No extrapolar estos tiempos ni esa similitud a español, otro hardware o al audio real del usuario.
 
-Los workflows siguen usando referencias como `actions/checkout@v4`. El endurecimiento completo requeriría fijar cada Action al SHA correspondiente y mantener esos SHA mediante un proceso de actualización. No se mezcló este cambio con la auditoría funcional sin una matriz de versiones verificada.
+### Android
 
-### A9. [LIMITACIÓN DE INTEGRIDAD] Primera descarga de modelos
+La versión que incorporó hash de primera descarga, JNI seguro, `decodeRange()` y bloques largos compiló correctamente en `Android APK`. El job de release firmado se omite cuando no existe keystore, como está diseñado.
 
-- Escritorio diarización: los assets históricos consultados no entregan un digest de origen utilizable; se verifica HTTPS+tamaño y luego se fija hash local.
-- Android Whisper: se calcula hash local después de la primera descarga, pero no existe todavía un catálogo interno de hashes esperados de origen.
+## 5. Límites que permanecen
 
-La protección actual detecta corrupción posterior, no un servidor/origen comprometido durante la primera recepción.
+No quedan como deuda de código los antiguos pendientes de bloques Android, pins de Actions, hashes esperados Android ni fuga del Handle JNI.
 
-### A10. [DEUDA TÉCNICA MENOR] Handle JNI deliberadamente no liberado
+Sí requieren prueba externa/manual:
 
-`nativeFree` libera `whisper_context` pero conserva el pequeño `Handle` para evitar una carrera con `nativeRequestAbort`. El costo es una fuga de pocos bytes por handle/modelo cargado durante la vida del proceso. No afecta el modelo pesado; debe revisarse si se rediseña la sincronización JNI.
+- calidad acústica exacta en el audio real del usuario;
+- efecto real del precheck V5.2 sobre tiempo/calidad en audios con sobredetección;
+- DER/JER con corpus temporalmente anotado;
+- micrófono/loopback en hardware real;
+- apertura y flujo de ejecutables PyInstaller en equipos reales;
+- Android físico: empalmes de bloques largos, RAM, batería, temperatura y actualización firmada;
+- GPU CUDA en hardware compatible.
 
-## 4. Rendimiento y diarización
+## 6. Criterio de cierre
 
-Las pruebas reales mostraron que la diarización puede dominar el tiempo en CPU, especialmente con `Precisa` (`window_shift_ratio=0.10`) y una segunda pasada Auto.
-
-Recomendación operativa:
-
-- uso normal: **Equilibrada (0.20)**;
-- Precisa: solo cuando la resolución temporal justifique el costo;
-- medir ASR y diarización por separado en cada equipo.
-
-La calibración V5.1 con audios oficiales de sherpa de 2 y 4 hablantes observó, en esas muestras, pares de un mismo hablante hasta aproximadamente 0,45 y pares distintos hasta aproximadamente 0,33. Son referencias de ingeniería con márgenes conservadores, no biometría universal.
-
-## 5. Verificación de cierre — COMPROBADA
-
-### Desktop checks
-
-`Desktop checks #41`, commit de documentación V5.1 `7ef467d8093830627f7c08edcfdc62decb6c39d2`: **success**. Compilación y pytest terminaron correctamente en Windows, macOS y Ubuntu. El código V5.1 ya había pasado además la ejecución #40 inmediatamente anterior.
-
-### Smoke acústico V5.1
-
-Workflow temporal ejecutado y luego eliminado. Resultado: **success**.
-
-- `1-two-speakers-en.wav`: esperado 2, detectado **2**, 1 pasada, consistencia de identidad `media`.
-- `0-four-speakers-zh.wav`: esperado 4, detectado **4**, 1 pasada, consistencia `alta`.
-- En el segundo trabajo se comprobaron reutilización de modelos, motor y extractor de identidad.
-- La capa V5.1 no alteró los conteos correctos.
-- Tiempos wall sherpa del runner: aproximadamente 0,81 s y 4,62 s.
-
-Estos audios validan un smoke de conteo/reutilización, no constituyen un benchmark completo de DER/JER.
-
-### Android APK
-
-`Android APK #19`, commit `2a4e186340c11db4642fa5a199554d82c152dbe8`: **success**.
-
-- build debug: success;
-- pin exacto de whisper.cpp: compilado;
-- artefacto `TranscriptorVtT-debug-apk`: 5.875.573 bytes;
-- digest del artefacto GitHub: `sha256:05dbc20ea1efb6617d919a9c7bd2445dec4c2a554679663c895ced251b09ee22`;
-- release firmado opcional: omitido porque no había keystore configurado, sin convertirlo en falla.
-
-### PyInstaller V5.1
-
-`Desktop executables #6`, run `34379042391`: **success** en los tres sistemas.
-
-- Windows: 126.819.307 bytes; `sha256:e354becf89500db02c4872ba80167ae6e2a6713b692f00628c103f82c19c1399`.
-- Ubuntu: 186.146.208 bytes; `sha256:20d4e7dafecd2c66e5a71d248b092797b853f2bb87230eac74afe5b12f62a46f`.
-- macOS: 198.704.500 bytes; `sha256:c1bf9ba76d03b6462e6a1749b2a1b90eeb058400dd7c880248559a5fe5848218`.
-
-Los artefactos se construyeron desde `8acfa166094787bb74ea31ec0bafd49ebffa9f95` y expiran el 8 de diciembre de 2026.
-
-### Limpieza
-
-- workflow acústico temporal: **eliminado**;
-- trigger temporal de `desktop-build.yml`: **restaurado** al blob manual original `b3e0ce08efc1def0294c9bf9c1181f0052ce6f25`;
-- no hay diferencias permanentes en `desktop-build.yml` respecto de la base V5.1.
-
-## 6. Qué NO queda probado por CI
-
-- calidad acústica exacta en cada audio del usuario;
-- funcionamiento de micrófono/loopback en cada hardware;
-- memoria/batería/temperatura Android con audios largos;
-- ground truth de hablantes en material no anotado;
-- autenticación criptográfica de la primera descarga de modelos sin un digest oficial esperado.
-
-Esas materias permanecen en `PRUEBAS_MANUALES.md` o en el roadmap y no impiden declarar cerrada la auditoría de código/CI/empaquetado V5.1.
-
-## 7. Resultado de cierre
-
-La auditoría V5.1 queda **cerrada para código, documentación, CI, smoke acústico reproducible y empaquetado**. Los pendientes que sobreviven son de producto/hardening y están expresamente documentados: audio largo Android por bloques, pins SHA de Actions, autenticación inicial de modelos y mejora futura de la sincronización/vida del pequeño Handle JNI.
+Código, CI, builds y documentación solo se consideran cerrados cuando la ejecución correspondiente está verde y no queda infraestructura temporal en el árbol. Las pruebas acústicas/hardware anteriores no deben convertirse en afirmaciones de certeza hasta que se ejecuten.
