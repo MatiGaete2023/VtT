@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Diarizacion local opcional para VtT usando sherpa-onnx.
+"""Diarización local opcional para VtT usando sherpa-onnx.
 
-Los modelos se descargan solo cuando el usuario activa diarizacion. GitHub no
-publica SHA-256 para estos dos assets historicos (digest=null), por lo que la
-primera descarga se valida por origen HTTPS oficial + tamaño esperado y luego
-se fija su SHA-256 local para detectar alteraciones posteriores.
+Los modelos se descargan solo cuando el usuario activa diarización. Los assets
+históricos de sherpa-onnx no publican ``digest`` en la API de GitHub; para
+eliminar el TOFU anterior, VtT fija los SHA-256 observados y repetidos en dos
+descargas independientes desde los assets oficiales el 9 de septiembre de
+2026. Tanto el archivo comprimido como el ONNX extraído y el embedding deben
+coincidir exactamente antes de ser usados.
 """
 from __future__ import annotations
 
@@ -22,11 +24,20 @@ SEGMENTATION_URL = (
     "speaker-segmentation-models/sherpa-onnx-pyannote-segmentation-3-0.tar.bz2"
 )
 SEGMENTATION_ARCHIVE_SIZE = 6_958_444
+SEGMENTATION_ARCHIVE_SHA256 = (
+    "24615ee884c897d9d2ba09bb4d30da6bb1b15e685065962db5b02e76e4996488"
+)
+SEGMENTATION_MODEL_SHA256 = (
+    "220ad67ca923bef2fa91f2390c786097bf305bceb5e261d4af67b38e938e1079"
+)
 EMBEDDING_URL = (
     "https://github.com/k2-fsa/sherpa-onnx/releases/download/"
     "speaker-recongition-models/3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx"
 )
 EMBEDDING_SIZE = 39_593_761
+EMBEDDING_SHA256 = (
+    "1a331345f04805badbb495c775a6ddffcdd1a732567d5ec8b3d5749e3c7a5e4b"
+)
 
 
 def sha256_archivo(ruta: Path) -> str:
@@ -46,18 +57,39 @@ def _leer_hash_pin(ruta: Path) -> Optional[str]:
         return None
 
 
-def _guardar_hash_pin(ruta: Path) -> str:
-    valor = sha256_archivo(ruta)
-    ruta.with_suffix(ruta.suffix + ".sha256").write_text(valor + "\n", encoding="utf-8")
-    return valor
+def _guardar_hash_pin(ruta: Path, valor: Optional[str] = None) -> str:
+    esperado = (valor or sha256_archivo(ruta)).lower()
+    ruta.with_suffix(ruta.suffix + ".sha256").write_text(
+        esperado + "\n", encoding="utf-8"
+    )
+    return esperado
 
 
-def validar_archivo_modelo(ruta: Path, tamano: Optional[int] = None) -> Tuple[bool, str]:
+def validar_archivo_modelo(
+    ruta: Path,
+    tamano: Optional[int] = None,
+    sha256_esperado: Optional[str] = None,
+) -> Tuple[bool, str]:
     if not ruta.is_file():
         return False, "no existe"
     if tamano is not None and ruta.stat().st_size != tamano:
         return False, f"tamaño inesperado: {ruta.stat().st_size} != {tamano}"
+
+    esperado = sha256_esperado.lower() if sha256_esperado else None
     pin = _leer_hash_pin(ruta)
+    # Si existe un hash de origen fijado, es la autoridad. El sidecar local es
+    # solo caché/proveniencia y no puede sustituirlo.
+    if esperado is not None:
+        actual = sha256_archivo(ruta)
+        if actual != esperado:
+            return False, "SHA-256 no coincide con el valor auditado"
+        if pin != esperado:
+            try:
+                _guardar_hash_pin(ruta, esperado)
+            except OSError:
+                pass
+        return True, "ok"
+
     if pin:
         actual = sha256_archivo(ruta)
         if actual != pin:
@@ -65,7 +97,13 @@ def validar_archivo_modelo(ruta: Path, tamano: Optional[int] = None) -> Tuple[bo
     return True, "ok"
 
 
-def _descargar(url: str, destino: Path, tamano: int, log: Callable[[str], None]) -> None:
+def _descargar(
+    url: str,
+    destino: Path,
+    tamano: int,
+    sha256_esperado: str,
+    log: Callable[[str], None],
+) -> None:
     destino.parent.mkdir(parents=True, exist_ok=True)
     parcial = destino.with_suffix(destino.suffix + ".part")
     parcial.unlink(missing_ok=True)
@@ -80,19 +118,37 @@ def _descargar(url: str, destino: Path, tamano: int, log: Callable[[str], None])
     if parcial.stat().st_size != tamano:
         obtenido = parcial.stat().st_size
         parcial.unlink(missing_ok=True)
-        raise RuntimeError(f"Descarga incompleta de {destino.name}: {obtenido} bytes; esperados {tamano}")
+        raise RuntimeError(
+            f"Descarga incompleta de {destino.name}: {obtenido} bytes; "
+            f"esperados {tamano}"
+        )
+    actual = sha256_archivo(parcial)
+    if actual != sha256_esperado.lower():
+        parcial.unlink(missing_ok=True)
+        raise RuntimeError(
+            f"SHA-256 inesperado para {destino.name}; la descarga no coincide "
+            "con el asset auditado de VtT"
+        )
     os.replace(parcial, destino)
-    _guardar_hash_pin(destino)
+    _guardar_hash_pin(destino, sha256_esperado)
 
 
 def _extraer_modelo_segmentacion(archivo: Path, destino: Path) -> None:
     """Extrae solo model.onnx por flujo; nunca usa extractall (evita path traversal)."""
     with tarfile.open(archivo, mode="r:bz2") as tar:
-        candidatos = [m for m in tar.getmembers() if m.isfile() and m.name.endswith("/model.onnx")]
+        candidatos = [
+            m for m in tar.getmembers()
+            if m.isfile() and m.name.endswith("/model.onnx")
+        ]
         if not candidatos:
-            candidatos = [m for m in tar.getmembers() if m.isfile() and m.name == "model.onnx"]
+            candidatos = [
+                m for m in tar.getmembers()
+                if m.isfile() and m.name == "model.onnx"
+            ]
         if len(candidatos) != 1:
-            raise RuntimeError("El paquete de segmentación no contiene un model.onnx único")
+            raise RuntimeError(
+                "El paquete de segmentación no contiene un model.onnx único"
+            )
         src = tar.extractfile(candidatos[0])
         if src is None:
             raise RuntimeError("No se pudo leer model.onnx del paquete")
@@ -103,29 +159,66 @@ def _extraer_modelo_segmentacion(archivo: Path, destino: Path) -> None:
                 if not bloque:
                     break
                 out.write(bloque)
+        actual = sha256_archivo(parcial)
+        if actual != SEGMENTATION_MODEL_SHA256:
+            parcial.unlink(missing_ok=True)
+            raise RuntimeError(
+                "El model.onnx extraído no coincide con el hash auditado"
+            )
         os.replace(parcial, destino)
-        _guardar_hash_pin(destino)
+        _guardar_hash_pin(destino, SEGMENTATION_MODEL_SHA256)
 
 
-def asegurar_modelos(carpeta: Path, log: Optional[Callable[[str], None]] = None) -> Tuple[Path, Path]:
+def asegurar_modelos(
+    carpeta: Path,
+    log: Optional[Callable[[str], None]] = None,
+) -> Tuple[Path, Path]:
     log = log or (lambda _: None)
     carpeta.mkdir(parents=True, exist_ok=True)
     seg_model = carpeta / "pyannote-segmentation-3.0.onnx"
     emb_model = carpeta / "3dspeaker-eres2net-base-16k.onnx"
 
-    ok_seg, _ = validar_archivo_modelo(seg_model)
+    ok_seg, _ = validar_archivo_modelo(
+        seg_model, sha256_esperado=SEGMENTATION_MODEL_SHA256
+    )
     if not ok_seg:
+        # Descarta un ONNX antiguo/corrupto: desde V5.2 no se confía en su
+        # sidecar histórico; se reconstruye desde un archive autenticado.
+        seg_model.unlink(missing_ok=True)
+        seg_model.with_suffix(seg_model.suffix + ".sha256").unlink(missing_ok=True)
         archivo = carpeta / "sherpa-onnx-pyannote-segmentation-3-0.tar.bz2"
-        ok_archivo, _ = validar_archivo_modelo(archivo, SEGMENTATION_ARCHIVE_SIZE)
+        ok_archivo, _ = validar_archivo_modelo(
+            archivo,
+            SEGMENTATION_ARCHIVE_SIZE,
+            SEGMENTATION_ARCHIVE_SHA256,
+        )
         if not ok_archivo:
-            _descargar(SEGMENTATION_URL, archivo, SEGMENTATION_ARCHIVE_SIZE, log)
+            archivo.unlink(missing_ok=True)
+            archivo.with_suffix(archivo.suffix + ".sha256").unlink(missing_ok=True)
+            _descargar(
+                SEGMENTATION_URL,
+                archivo,
+                SEGMENTATION_ARCHIVE_SIZE,
+                SEGMENTATION_ARCHIVE_SHA256,
+                log,
+            )
         _extraer_modelo_segmentacion(archivo, seg_model)
         archivo.unlink(missing_ok=True)
         archivo.with_suffix(archivo.suffix + ".sha256").unlink(missing_ok=True)
 
-    ok_emb, _ = validar_archivo_modelo(emb_model, EMBEDDING_SIZE)
+    ok_emb, _ = validar_archivo_modelo(
+        emb_model, EMBEDDING_SIZE, EMBEDDING_SHA256
+    )
     if not ok_emb:
-        _descargar(EMBEDDING_URL, emb_model, EMBEDDING_SIZE, log)
+        emb_model.unlink(missing_ok=True)
+        emb_model.with_suffix(emb_model.suffix + ".sha256").unlink(missing_ok=True)
+        _descargar(
+            EMBEDDING_URL,
+            emb_model,
+            EMBEDDING_SIZE,
+            EMBEDDING_SHA256,
+            log,
+        )
 
     return seg_model, emb_model
 
@@ -141,7 +234,9 @@ def decodificar_audio_mono(ruta: str, sample_rate: int) -> Any:
         stream = next((s for s in cont.streams if s.type == "audio"), None)
         if stream is None:
             raise ValueError("El archivo no contiene pista de audio")
-        resampler = av.AudioResampler(format="fltp", layout="mono", rate=sample_rate)
+        resampler = av.AudioResampler(
+            format="fltp", layout="mono", rate=sample_rate
+        )
         for frame in cont.decode(stream):
             for rf in resampler.resample(frame):
                 arr = rf.to_ndarray()
@@ -153,7 +248,9 @@ def decodificar_audio_mono(ruta: str, sample_rate: int) -> Any:
             finales = []
         for rf in finales:
             arr = rf.to_ndarray()
-            piezas.append(np.asarray(arr[0] if arr.ndim > 1 else arr, dtype=np.float32))
+            piezas.append(
+                np.asarray(arr[0] if arr.ndim > 1 else arr, dtype=np.float32)
+            )
     finally:
         cont.close()
     if not piezas:
@@ -181,7 +278,9 @@ def diarizar(
                 model=str(seg_model), window_shift_ratio=0.1
             )
         ),
-        embedding=sherpa_onnx.SpeakerEmbeddingExtractorConfig(model=str(emb_model)),
+        embedding=sherpa_onnx.SpeakerEmbeddingExtractorConfig(
+            model=str(emb_model)
+        ),
         clustering=sherpa_onnx.FastClusteringConfig(
             num_clusters=int(num_speakers), threshold=float(threshold)
         ),
@@ -189,14 +288,18 @@ def diarizar(
         min_duration_off=0.5,
     )
     if not config.validate():
-        raise RuntimeError("Configuración de diarización inválida; revisa los modelos")
+        raise RuntimeError(
+            "Configuración de diarización inválida; revisa los modelos"
+        )
     sd = sherpa_onnx.OfflineSpeakerDiarization(config)
     log("Decodificando audio para identificar hablantes…")
     audio = decodificar_audio_mono(ruta, int(sd.sample_rate))
 
     def callback(procesados: int, total: int) -> int:
         if total:
-            progreso(min(100.0, max(0.0, procesados / total * 100.0)))
+            progreso(
+                min(100.0, max(0.0, procesados / total * 100.0))
+            )
         return 0
 
     log("Identificando cambios de hablante…")
