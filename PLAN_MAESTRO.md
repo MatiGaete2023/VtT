@@ -1,9 +1,10 @@
 # PLAN MAESTRO — VtT
 
 **Actualizado:** 9 de septiembre de 2026  
-**Rama de trabajo:** `claude/voice-transcriber-multiplatform-6xifq1`
+**Rama de trabajo:** `claude/voice-transcriber-multiplatform-6xifq1`  
+**Estado V5.1:** **CIERRE VERIFICADO**
 
-Este documento reemplaza el plan antiguo que todavía describía como abiertos defectos ya corregidos. El objetivo actual es conservar una base verificable y avanzar solo sobre pendientes reales.
+Este documento describe el estado real posterior a la auditoría V5.1. Los defectos históricos ya resueltos no se mantienen como pendientes.
 
 ## 1. Objetivo del producto
 
@@ -32,7 +33,7 @@ La red se usa únicamente para instalar dependencias, descargar modelos, descarg
 - confianza de identidad y del conteo;
 - JSON schema v6;
 - DOCX diagnóstico;
-- CI en tres SO.
+- CI y PyInstaller verificados en Windows/macOS/Ubuntu.
 
 ### Android
 
@@ -43,6 +44,8 @@ La red se usa únicamente para instalar dependencias, descargar modelos, descarg
 - TXT/SRT;
 - descarga reanudable de modelos;
 - integridad local por tamaño + SHA-256 post-descarga;
+- whisper.cpp fijado al commit `8a9ad7844d6e2a10cddf4b92de4089d7ac2b14a9`;
+- APK debug CI verificado;
 - sin diarización V5.1.
 
 ## 3. Reglas transversales
@@ -55,10 +58,10 @@ La red se usa únicamente para instalar dependencias, descargar modelos, descarg
 6. Documentación, mensajes de UI y commits del proyecto en español.
 7. No afirmar como verificado algo que solo es estimado.
 8. Antes de usar una API externa, comprobar su firma/versión real.
-9. Código modular de escritorio: la base histórica puede permanecer en `transcriptor_whisper.py`, pero las nuevas capas deben conservar responsabilidades separadas.
-10. Todo cambio funcional debe tener una verificación prevista y una verificación posterior.
+9. Código modular de escritorio: las nuevas responsabilidades deben permanecer en capas específicas.
+10. Todo cambio funcional debe tener verificación prevista y posterior.
 
-## 4. Fases ya cerradas
+## 4. Fases cerradas
 
 ### F1 — Robustez de escritorio
 
@@ -99,7 +102,7 @@ Cerrado:
 
 ### F4 — Identidad V5.1
 
-Cerrado en código y pruebas unitarias/CI:
+Cerrado:
 
 - prototipos acústicos por identidad;
 - protección de microintervenciones;
@@ -110,67 +113,50 @@ Cerrado en código y pruebas unitarias/CI:
 - Auto presentado como estimación, no ground truth;
 - JSON schema v6.
 
-## 5. Fase de cierre V5.1 — obligatoria
+## 5. Cierre V5.1 — EJECUTADO
 
-Estas tareas deben ejecutarse antes de declarar V5.1 cerrada:
+### C1. Documentación coherente — OK
 
-### C1. Documentación coherente
+Actualizados `README.md`, `desktop/README.md`, `AUDITORIA.md`, `PLAN_MAESTRO.md`, `PRUEBAS_MANUALES.md`, `AGENTS.md`, `MODEL_CATALOG.md` y `android/README.md`.
 
-Actualizar:
+Ya no se describe Python 3.8, JSON v2 ni una arquitectura monolítica como estado actual.
 
-- `README.md`;
-- `desktop/README.md`;
-- `AUDITORIA.md`;
-- `PLAN_MAESTRO.md`;
-- `PRUEBAS_MANUALES.md`;
-- `AGENTS.md`;
-- `MODEL_CATALOG.md` si corresponde.
+### C2. Auditoría Android/workflows — OK con límites documentados
 
-Criterio: ningún documento puede seguir diciendo Python 3.8, JSON v2 o aplicación de escritorio monolítica como estado actual.
+Comprobados ciclo de vida, cancelación, descarga/integridad de modelos, manifest/intents, Gradle, CMake/JNI y workflows. Cambios permanentes:
 
-### C2. Auditoría Android/workflows
+- pin exacto de whisper.cpp;
+- permisos GitHub Actions reducidos por job;
+- limpieza del keystore temporal.
 
-Verificar:
+Límite de producto que continúa: audio Android completo en memoria para transcribir; requiere una fase específica por bloques y pruebas físicas.
 
-- ciclo de vida y cancelación;
-- descarga/integridad de modelos;
-- memoria para audios largos;
-- manifest/intents;
-- build.gradle/CMake/JNI;
-- Android CI;
-- desktop CI/build.
+### C3. Smoke acústico V5.1 — OK
 
-Corregir defectos reales; separar hardening de funcionalidad.
+Audios oficiales sherpa-onnx:
 
-### C3. Smoke acústico V5.1
+- 2 hablantes → 2 detectados, identidad media;
+- 4 hablantes → 4 detectados, identidad alta;
+- 1 pasada en ambos;
+- reutilización de modelos, motor y extractor comprobada en el segundo archivo.
 
-Usar audios oficiales de sherpa-onnx con ground truth conocido:
+El workflow temporal usado para esta prueba fue eliminado después.
 
-- `1-two-speakers-en.wav` → 2 hablantes;
-- `0-four-speakers-zh.wav` → 4 hablantes.
+### C4. PyInstaller V5.1 — OK
 
-El smoke debe ejecutar el motor V5.1, no solo V5, y comprobar:
+`Desktop executables #6` completó exitosamente Windows/macOS/Ubuntu y produjo artefactos para los tres sistemas.
 
-- conteo esperado;
-- `identity_verification.enabled`;
-- no degradación a cero turnos;
-- worker/reutilización en una segunda tarea;
-- tiempos wall disponibles;
-- que la capa de identidad no convierta una solución correcta en una estructura absurda.
+### C5. Limpieza — OK
 
-### C4. PyInstaller V5.1
-
-Construir Windows/macOS/Ubuntu con `desktop/vtt_main.py`. Verificar que PyInstaller incorpora todos los módulos V5.1 y las dependencias nativas.
-
-### C5. Limpieza
-
-Eliminar workflows temporales de calibración/smoke/build. Comparar el árbol final y verificar que no quede infraestructura de prueba accidental.
+- smoke workflow temporal eliminado;
+- `desktop-build.yml` restaurado a `workflow_dispatch` manual y al blob original;
+- comparación final no muestra diferencias netas del trigger temporal.
 
 ## 6. Roadmap posterior
 
 ### P1 — Android: audio largo por bloques
 
-Problema real abierto: `AudioDecoder` conserva PCM completo en memoria. Diseñar decodificación incremental y transcripción por bloques de aproximadamente 5–10 min con solape. Debe resolver:
+Problema real abierto: `AudioDecoder` conserva PCM completo en memoria. Diseñar decodificación incremental y transcripción por bloques con solape. Debe resolver:
 
 - continuidad de timestamps;
 - deduplicación del solape;
@@ -180,10 +166,6 @@ Problema real abierto: `AudioDecoder` conserva PCM completo en memoria. Diseñar
 
 No implementar sin pruebas en dispositivo físico.
 
-### P1 — Reproducibilidad Android
-
-Fijar whisper.cpp al commit exacto del release validado (`v1.7.4` resuelve actualmente a `8a9ad7844d6e2a10cddf4b92de4089d7ac2b14a9`) y comprobar Android CI.
-
 ### P2 — Supply-chain hardening
 
 - fijar GitHub Actions por SHA tras comprobar cada acción;
@@ -192,13 +174,17 @@ Fijar whisper.cpp al commit exacto del release validado (`v1.7.4` resuelve actua
 
 No inventar digests.
 
-### P2 — Métricas de calidad
+### P2 — Métricas de calidad de diarización
 
-Construir un pequeño corpus de prueba con ground truth manual de hablantes y cambios. Medir DER/JER o, al menos, precisión de boundaries y consistencia de identidad. Los audios oficiales 2/4 son smoke tests, no un benchmark suficiente.
+Construir un corpus pequeño con ground truth manual de hablantes y cambios. Medir DER/JER o, como mínimo, precisión de boundaries y consistencia de identidad. Los audios oficiales de 2/4 hablantes son smoke tests, no benchmark suficiente.
 
 ### P3 — Android y diarización
 
 No trasladar sherpa/V5.1 al APK hasta resolver costo, tamaño de modelos, memoria y UX. Android mantiene ASR local sin diarización por diseño actual.
+
+### P3 — Handle JNI
+
+Evaluar una sincronización que permita liberar también el pequeño `Handle` nativo sin riesgo de carrera con `nativeRequestAbort`. La fuga actual es deliberada y de pocos bytes por handle, no del modelo pesado.
 
 ## 7. Configuración recomendada para uso real
 
@@ -208,11 +194,11 @@ No trasladar sherpa/V5.1 al APK hasta resolver costo, tamaño de modelos, memori
 - ASR: Equilibrado;
 - diarización: Equilibrada;
 - Auto cuando no se conoce el número de voces;
-- Precisa solo para casos donde el costo CPU sea aceptable.
+- Precisa solo cuando el costo CPU sea aceptable.
 
 ### Evaluación de un problema
 
-Comparar siempre en el mismo audio:
+Comparar en el mismo audio:
 
 1. ASR seconds;
 2. diarization seconds;
@@ -220,7 +206,7 @@ Comparar siempre en el mismo audio:
 4. número estimado de voces;
 5. confianza de identidad;
 6. segmentos divididos/cambios internos;
-7. revisión humana de algunos boundaries.
+7. revisión humana de boundaries seleccionados.
 
 ## 8. Criterio de una tarea “terminada”
 
