@@ -1,4 +1,4 @@
-name: VtT V5.1 embedding calibration
+name: VtT V5.1 acoustic smoke
 
 on:
   push:
@@ -8,7 +8,7 @@ on:
       - ".github/workflows/vtt-v51-calibration.yml"
 
 jobs:
-  calibrate:
+  smoke:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -21,72 +21,49 @@ jobs:
         run: |
           curl -L --fail -o /tmp/1-two-speakers-en.wav https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-segmentation-models/1-two-speakers-en.wav
           curl -L --fail -o /tmp/0-four-speakers-zh.wav https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-segmentation-models/0-four-speakers-zh.wav
-      - name: Measure turn embedding similarities
+      - name: Run V5.1 acoustic smoke
         working-directory: desktop
         run: |
           python - <<'PY'
           from pathlib import Path
-          import numpy as np
-          import sherpa_onnx
-          import vtt_diarization as legacy
-          from vtt_diarization_v5 import DiarizationEngine
+          from vtt_diarization_v51 import DiarizationEngine
 
-          def cosine(a, b):
-              a=np.asarray(a,dtype=np.float32); b=np.asarray(b,dtype=np.float32)
-              da=float(np.linalg.norm(a)); db=float(np.linalg.norm(b))
-              return float(np.dot(a,b)/(da*db)) if da and db else 0.0
+          engine = DiarizationEngine(Path('/tmp/vtt-v51-smoke-models'))
+          cases = [
+              ('/tmp/1-two-speakers-en.wav', 2),
+              ('/tmp/0-four-speakers-zh.wav', 4),
+          ]
 
-          def emb(extractor, samples, sr):
-              stream=extractor.create_stream()
-              stream.accept_waveform(sample_rate=sr, waveform=np.ascontiguousarray(samples,dtype=np.float32))
-              stream.input_finished()
-              if not extractor.is_ready(stream):
-                  return None
-              x=np.asarray(extractor.compute(stream),dtype=np.float32)
-              n=float(np.linalg.norm(x))
-              return x/n if n else None
-
-          models=Path('/tmp/vtt-v51-models')
-          engine=DiarizationEngine(models)
-          cases=[('/tmp/1-two-speakers-en.wav',2),('/tmp/0-four-speakers-zh.wav',4)]
-          for wav, expected in cases:
-              turns, meta=engine.diarize(wav,num_speakers=-1,adaptive=True,diar_profile='Equilibrada',log=lambda _x:None,progreso=lambda _x:None)
-              detected=len({int(t['speaker']) for t in turns})
-              assert detected==expected,(wav,expected,detected)
-              cfg=sherpa_onnx.SpeakerEmbeddingExtractorConfig(model=str(engine.emb_model),num_threads=int(engine.threads or 1),debug=False,provider='cpu')
-              extractor=sherpa_onnx.SpeakerEmbeddingExtractor(cfg)
-              audio=legacy.decodificar_audio_mono(wav,16000)
-              items=[]
-              for i,t in enumerate(turns):
-                  a=max(0,int(float(t['start'])*16000)); b=min(len(audio),int(float(t['end'])*16000))
-                  if b-a < int(0.8*16000):
-                      continue
-                  e=emb(extractor,audio[a:b],16000)
-                  if e is not None:
-                      items.append((i,int(t['speaker']),float(t['start']),float(t['end']),e))
-              same=[]; diff=[]
-              for i in range(len(items)):
-                  for j in range(i+1,len(items)):
-                      c=cosine(items[i][4],items[j][4])
-                      (same if items[i][1]==items[j][1] else diff).append(c)
-              def q(vals):
-                  if not vals: return None
-                  arr=np.asarray(vals)
-                  return {'n':len(vals),'min':float(arr.min()),'p10':float(np.quantile(arr,.10)),'median':float(np.median(arr)),'p90':float(np.quantile(arr,.90)),'max':float(arr.max())}
-              print('CASE',Path(wav).name,'turns',len(turns),'embeddings',len(items),'detected',detected)
-              print('SAME',q(same))
-              print('DIFF',q(diff))
-              by={}
-              for item in items: by.setdefault(item[1],[]).append(item)
-              protos={}
-              for sp, xs in by.items():
-                  p=np.mean([x[4] for x in xs],axis=0); p=p/(np.linalg.norm(p) or 1)
-                  protos[sp]=p
-              for sp,xs in sorted(by.items()):
-                  sims=[cosine(x[4],protos[sp]) for x in xs]
-                  rivals=[]
-                  for x in xs:
-                      other=max([cosine(x[4],p) for k,p in protos.items() if k!=sp],default=-1.0)
-                      rivals.append(other)
-                  print('SP',sp,'n',len(xs),'own_min',min(sims),'own_med',float(np.median(sims)),'rival_max',max(rivals))
+          for job_index, (wav, expected) in enumerate(cases, 1):
+              turns, meta = engine.diarize(
+                  wav,
+                  num_speakers=-1,
+                  adaptive=True,
+                  diar_profile='Equilibrada',
+                  log=print,
+                  progreso=lambda _pct: None,
+              )
+              detected = len({int(t['speaker']) for t in turns})
+              iv = meta.get('identity_verification') or {}
+              consistency = meta.get('identity_consistency') or {}
+              print(
+                  'SMOKE', Path(wav).name,
+                  'expected', expected,
+                  'detected', detected,
+                  'passes', meta.get('passes'),
+                  'identity', consistency.get('overall_confidence'),
+                  'worker_job', meta.get('worker_job_index'),
+                  'engine_reused', meta.get('engine_reused'),
+                  'extractor_reused', iv.get('extractor_reused'),
+                  'wall', meta.get('sherpa_process_wall_seconds'),
+              )
+              assert turns, f'{wav}: no se obtuvieron turnos'
+              assert detected == expected, (wav, expected, detected, meta)
+              assert iv.get('enabled') is True, (wav, iv)
+              assert float(meta.get('sherpa_process_wall_seconds', 0.0) or 0.0) > 0.0
+              assert int(meta.get('worker_job_index', 0) or 0) == job_index
+              if job_index == 2:
+                  assert meta.get('models_reused') is True, meta
+                  assert meta.get('engine_reused') is True, meta
+                  assert iv.get('extractor_reused') is True, iv
           PY
