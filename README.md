@@ -5,11 +5,15 @@ VtT transcribe audio y video **en el propio equipo**. La inferencia de voz no en
 - `desktop/`: Python/Tkinter + `faster-whisper` + `sherpa-onnx`, para Windows, macOS y Linux.
 - `android/`: Kotlin + `whisper.cpp`, para Android ARM64. Android **no incorpora la diarización del escritorio**.
 
-## Escritorio — estado actual V5.2-performance
+## Estado actual
+
+La rama de trabajo `claude/voice-transcriber-multiplatform-6xifq1` contiene **V5.2-performance**. El código de escritorio, la CI multiplataforma, el empaquetado PyInstaller y el build Android han sido verificados. La calidad acústica exacta sobre audios reales no anotados, DER/JER, CUDA y pruebas de hardware siguen siendo validaciones externas y no se presentan como resueltas.
+
+## Escritorio — V5.2-performance
 
 Requisito: **Python 3.9 o superior**. En Windows, entra en `desktop/` y abre `run.bat`; también puedes ejecutar `python run.py`. El lanzador crea una `.venv`, calcula el SHA-256 de `requirements.txt` y reinstala dependencias cuando ese archivo cambia.
 
-El entrypoint final es `desktop/vtt_main.py`. `transcriptor_whisper.py` conserva la base histórica y V5.2 añade capas específicas para pipeline, UI, diarización, identidad, alineación, reportes, validación y rendimiento.
+El entrypoint final es `desktop/vtt_main.py`. `transcriptor_whisper.py` conserva la base histórica y V5.2 añade capas específicas para pipeline, UI, diarización, identidad, alineación, reportes, validación, métricas y rendimiento.
 
 Funciones principales:
 
@@ -25,9 +29,11 @@ Funciones principales:
 - sonda barata de tres ventanas antes del escaneo detallado de turnos largos;
 - alineación palabra↔hablante y división de segmentos cuando cambia la voz;
 - conteos separados de clusters sherpa, clusters tras control de identidad y hablantes que recibieron texto;
+- contabilidad de identidad separada en etapa final, evaluaciones ligeras y total acumulado;
 - TXT/Markdown/Word en bloques de lectura; SRT/VTT conservan segmentos técnicos;
 - exportación `.txt`, `.md`, `.srt`, `.vtt`, `.json` y `.docx`;
 - JSON maestro **schema v7** con configuración, métricas, rendimiento, diarización, identidad, alineación y trazabilidad de Auto;
+- Word diagnóstico V5.2 con tiempos de identidad final/ligera/total y sin etiquetas heredadas V5.1;
 - revisión sincronizada con audio y renombrado de hablantes;
 - grabación de micrófono y captura de audio del sistema;
 - descarga explícita de audio de YouTube;
@@ -54,7 +60,7 @@ Desde la revisión de septiembre de 2026:
 - los GGML `tiny`, `base` y `small` se comparan contra SHA-256 esperados antes de promover una primera descarga a modelo válido;
 - las descargas siguen siendo reanudables mediante `Range`;
 - audios de más de 5 minutos se procesan en ventanas de 90 s con 2 s de solapamiento para acotar la memoria; timestamps y palabras se desplazan al tiempo global y se deduplica el solape;
-- el puente JNI usa identificadores opacos y `shared_ptr`/mutex para liberar también el pequeño Handle sin la fuga deliberada anterior;
+- el puente JNI usa identificadores opacos y `shared_ptr`/mutex para liberar también el Handle sin la fuga deliberada anterior;
 - whisper.cpp sigue fijado a un commit exacto.
 
 Android continúa **sin diarización de hablantes**. La calidad de bloques largos, memoria, batería y temperatura requieren validación en dispositivo físico.
@@ -65,21 +71,36 @@ Consulta [`android/README.md`](android/README.md).
 
 ```text
 desktop/
-  transcriptor_whisper.py       base histórica de UI, grabación y utilidades
-  vtt_main.py                   entrypoint final V5.2
-  vtt_core.py                   estructuras, bloques y exportación base
-  vtt_alignment.py              alineación palabra↔hablante
-  vtt_diarization_v5.py         motor base persistente e instrumentación
-  vtt_identity_v52.py           identidad rival-aware y sonda de turnos largos
-  vtt_diarization_v52.py        Auto V5.2 / precheck / selección identity-aware
-  vtt_pipeline_v52.py           pipeline final
-  vtt_reporting_v52.py          JSON v7 y DOCX diagnóstico
-  vtt_validation_v52.py         validación y conteos por etapa
-  vtt_performance.py            modos globales y presupuesto de rendimiento
-  tests/                        regresión del escritorio
-android/                        Kotlin + whisper.cpp/JNI
-.github/workflows/              CI y empaquetado
+  transcriptor_whisper.py          base histórica de UI, grabación y utilidades
+  vtt_main.py                      entrypoint final V5.2
+  vtt_core.py                      estructuras, bloques y exportación base
+  vtt_alignment.py                 alineación palabra↔hablante
+  vtt_diarization_v5.py            motor base persistente e instrumentación
+  vtt_identity_v52.py              identidad rival-aware y sonda de turnos largos
+  vtt_diarization_v52.py           Auto V5.2 / precheck / selección identity-aware
+  vtt_diarization_v52_metrics.py   contabilidad completa del trabajo de identidad
+  vtt_diarization_service_v52.py   worker persistente final
+  vtt_pipeline_v52.py              pipeline final
+  vtt_reporting_v52.py             JSON v7 y DOCX diagnóstico
+  vtt_validation_v52.py            validación y conteos por etapa
+  vtt_performance.py               modos globales y presupuesto de rendimiento
+  tests/                           regresión del escritorio
+android/                           Kotlin + whisper.cpp/JNI
+.github/workflows/                 CI y empaquetado
 ```
+
+Los módulos `v4`, `v5` y `v51` que aún existen forman la cadena de compatibilidad/herencia del pipeline final; no deben interpretarse como entrypoints alternativos ni eliminarse solo por su nombre de versión.
+
+## Mapa de documentación
+
+- [`desktop/README.md`](desktop/README.md): instalación, perfiles, pipeline y diagnóstico de escritorio.
+- [`android/README.md`](android/README.md): instalación, modelos, bloques largos y JNI Android.
+- [`MODEL_CATALOG.md`](MODEL_CATALOG.md): fuentes, tamaños, hashes y política de actualización de modelos.
+- [`AUDITORIA.md`](AUDITORIA.md): hallazgos corregidos, evidencia CI/build y límites vigentes.
+- [`PLAN_MAESTRO.md`](PLAN_MAESTRO.md): arquitectura, fases cerradas y próximas validaciones externas.
+- [`PRUEBAS_MANUALES.md`](PRUEBAS_MANUALES.md): pruebas que CI no puede sustituir.
+- [`AGENTS.md`](AGENTS.md): contrato para futuras modificaciones del repositorio.
+- [`android/RELEASE_SETUP.md`](android/RELEASE_SETUP.md): configuración externa necesaria para un APK de producción firmado.
 
 ## Privacidad y red
 
