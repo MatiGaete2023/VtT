@@ -155,47 +155,66 @@ Probar 10, 60 y >90 minutos:
 - [ ] cancelación intermedia;
 - [ ] memoria, batería y temperatura.
 
-## 10. APK/release
+## 10. APK/release — CI OK, hardware pendiente
 
-- [x] `Android APK #26`: build debug final verde.
+`Android APK #28`, run `34424903439`, commit `5f51ae8c197cbd7ec8a72eb8e9c93e1532b2713a`:
+
+- [x] build debug final verde.
 - [x] artefacto debug y release rodante publicados por CI.
+- [x] ausencia de keystore detectada y ruta firmada omitida de forma explícita.
 - [ ] instalar APK final en teléfono físico y completar flujo.
 - [ ] con secrets de firma, producir/verificar APK firmado y `.sha256`.
-- [ ] prueba de actualización de `android/RELEASE_SETUP.md`.
+- [ ] probar actualización entre dos releases firmadas con el mismo certificado.
+
+La ausencia de keystore de producción es **PENDIENTE EXTERNO**, no fallo del repositorio. Ver `android/RELEASE_SETUP.md`.
 
 ## 11. Empaquetado escritorio — OK 09-09-2026
 
-`Desktop executables #8`, run `34407796151`, commit `5b2703d44f5196aa70769ae54ae6d945dab90d26`:
+`Desktop executables #9`, run `34425016894`, commit `2156cae37ca2ecbaec5c57081d6f6c3409086e10`:
 
 - [x] Windows PyInstaller.
 - [x] Ubuntu PyInstaller.
 - [x] macOS PyInstaller.
 - [x] artefactos en los tres sistemas.
+- [x] incluye el reporting V5.2 corregido.
 - [x] workflow restaurado a `workflow_dispatch` sin trigger temporal.
 - [ ] abrir/usar cada ejecutable en hardware real.
 
 Artefactos de CI:
 
 ```text
-Windows  126.869.051 bytes  sha256:6d949ec154ed831631f99bf865c75a7261ade18ba546dfccd78ad828d6be8438
-Ubuntu   186.195.924 bytes  sha256:3c38cc9f16e67fc919d41bc0d560b8d310e662528a65336c28d4175843594e9d
-macOS    198.803.581 bytes  sha256:9f495afc5e0f11cac65fb188f5aa5764ceaa15324fe53ea6ab375b303f4f2890
+Windows  126.869.660 bytes  sha256:da874a760725d77526a8358dd44751988d0c79c4d04f72576871d3d66a74d8e5
+Ubuntu   186.194.313 bytes  sha256:577d937bbe8ec7205bfadab540f16d1f4b52d7bd0e066df16c5198ee1e631121
+macOS    198.803.059 bytes  sha256:6f2f2f6b9bff8eb34d68ee8cd4446c1c420deef796f3340df4ef71df250323bd
 ```
 
-## 12. Regresión de métricas de identidad — OK 09-09-2026
+Caducidad CI: 9 de diciembre de 2026.
 
-`Desktop checks #69`, run `34407637074`:
+## 12. Regresiones automáticas de identidad/reporting — OK 09-09-2026
+
+`Desktop checks #73`, run `34424880813`:
 
 - [x] `vtt_diarization_v52_metrics.py` incluido en `py_compile`.
 - [x] prueba de suma simple `final + light`.
 - [x] valores negativos parciales no reducen el total válido.
-- [x] dos llamadas `_light_identity` simuladas se acumulan completas.
+- [x] múltiples llamadas `_light_identity` simuladas se acumulan completas.
 - [x] `identity_wall_seconds` coincide con `total_wall_seconds`.
+- [x] DOCX nuevo no contiene `Control identidad V5.1`.
+- [x] DOCX contiene `Control identidad V5.2`.
+- [x] DOCX expone total/final/ligero de identidad con los valores esperados.
 - [x] Windows, Ubuntu y macOS verdes.
 
-Esta prueba valida contabilidad diagnóstica; no modifica ni valida calidad acústica.
+Estas pruebas validan contabilidad y salida estructural; no validan calidad acústica.
 
-## 13. Registro de campañas manuales
+## 13. CI/documentación — OK 09-09-2026
+
+- [x] Markdown dentro de `desktop/` queda excluido de `Desktop checks`.
+- [x] Markdown dentro de `android/` queda excluido de `Android APK`.
+- [x] modificar los workflows mismos sigue disparando su validación.
+- [x] `Desktop checks #73` verifica el workflow de escritorio actualizado.
+- [x] `Android APK #28` verifica el workflow Android actualizado.
+
+## 14. Registro de campañas manuales
 
 No marcar hardware como ejecutado por CI.
 
