@@ -7,6 +7,7 @@ on:
       - "main"
     paths:
       - "android/**"
+      - "!android/**/*.md"
       - ".github/workflows/android-build.yml"
   workflow_dispatch:
 
