@@ -42,6 +42,13 @@ def _find_row(table, label: str):
     return None
 
 
+def _fmt_s(value: Any) -> str:
+    try:
+        return f"{float(value or 0.0):.2f} s"
+    except (TypeError, ValueError):
+        return "—"
+
+
 def _fmt_identity(sp: Mapping[str, Any]) -> str:
     confidence = str(sp.get("confidence", "sin_datos"))
     turns = int(sp.get("turns", 0) or 0)
@@ -100,6 +107,21 @@ def escribir_docx_detallado(
             f"identidad {valid.get('identity_confidence', 'sin_datos')}"
         )
 
+    # vtt_reporting_v51 crea estas filas por compatibilidad; V5.2 debe
+    # corregir su etiqueta visible y reflejar la nueva contabilidad completa.
+    iv = metricas.get("identity_verification") or {}
+    if iv.get("enabled"):
+        control = _find_row(table, "Control identidad V5.1")
+        if control is not None:
+            control.cells[0].text = "Control identidad V5.2"
+            control.cells[1].text = "Sí · control acústico conservador y selección identity-aware"
+        total_row = _find_row(table, "Verificación identidad")
+        if total_row is not None:
+            total_row.cells[0].text = "Identidad total (wall)"
+            total_row.cells[1].text = _fmt_s(
+                iv.get("total_wall_seconds", metricas.get("identity_wall_seconds", 0.0))
+            )
+
     consistency = metricas.get("identity_consistency") or {}
     unassigned = set(int(x) for x in (counts.get("unassigned_raw_ids") or []))
     for sp in consistency.get("speakers", []) or []:
@@ -125,6 +147,12 @@ def escribir_docx_detallado(
         ("Segunda pasada solicitada", "Sí" if metricas.get("auto_retry_requested") else "No"),
         ("Segunda pasada evitada", "Sí" if metricas.get("auto_retry_avoided") else "No"),
     ]
+    if iv.get("enabled"):
+        if "final_stage_wall_seconds" in iv:
+            rows.append(("Identidad etapa final (wall)", _fmt_s(iv.get("final_stage_wall_seconds"))))
+        if "light_identity_wall_seconds" in iv:
+            rows.append(("Identidad ligera (wall)", _fmt_s(iv.get("light_identity_wall_seconds"))))
+
     pre = metricas.get("auto_precheck") or {}
     if pre.get("enabled"):
         rows.append((
