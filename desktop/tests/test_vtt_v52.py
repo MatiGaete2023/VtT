@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import numpy as np
+from docx import Document
 
 import vtt_diarization_v52 as diar52
 import vtt_diarization_v52_metrics as metrics52
@@ -158,6 +159,65 @@ def test_identity_wall_metrics_include_every_light_identity_call(monkeypatch):
     assert verification["light_identity_wall_seconds"] == 2.5
     assert verification["total_wall_seconds"] == 5.5
     assert meta["identity_wall_seconds"] == 5.5
+
+
+def test_docx_v52_uses_current_identity_label_and_wall_breakdown(tmp_path):
+    path = tmp_path / "v52.docx"
+    metricas = {
+        "audio_seconds": 10.0,
+        "asr_seconds": 2.0,
+        "diarization_seconds": 3.0,
+        "export_seconds": 0.0,
+        "overhead_seconds": 0.0,
+        "diarization_enabled": True,
+        "speaker_mode": "Auto",
+        "speaker_detected": 2,
+        "speaker_text_assigned": 2,
+        "device": "cpu",
+        "compute_type": "int8",
+        "batched": True,
+        "batch_size": 4,
+        "beam_size": 5,
+        "diarization_profile": "Equilibrada",
+        "window_shift_ratio": 0.20,
+        "diarization_threads": 4,
+        "auto_passes": 1,
+        "identity_wall_seconds": 5.5,
+        "identity_verification": {
+            "enabled": True,
+            "wall_seconds": 3.0,
+            "final_stage_wall_seconds": 3.0,
+            "light_identity_wall_seconds": 2.5,
+            "total_wall_seconds": 5.5,
+        },
+        "identity_refinement": {},
+        "identity_local_scan": {},
+        "identity_consistency": {"overall_confidence": "media", "speakers": []},
+        "speaker_counts": {
+            "raw_acoustic_clusters": 2,
+            "identity_clusters_after_refinement": 2,
+            "text_assigned_speakers": 2,
+            "unassigned_raw_ids": [],
+        },
+        "speaker_count_validation": {
+            "status": "estimacion_acustica_estable",
+            "ground_truth_available": False,
+            "identity_confidence": "media",
+            "ambiguous": False,
+        },
+    }
+    reporting52.escribir_docx_detallado(
+        path, "audio.wav", "small", "es",
+        [{"start": 0.0, "speaker": "Persona 1", "text": "Hola"}],
+        metricas, "Equilibrado",
+    )
+    doc = Document(path)
+    data = {row.cells[0].text: row.cells[1].text for row in doc.tables[0].rows}
+    assert "Control identidad V5.1" not in data
+    assert "Control identidad V5.2" in data
+    assert data["Identidad total (wall)"] == "5.50 s"
+    assert data["Identidad etapa final (wall)"] == "3.00 s"
+    assert data["Identidad ligera (wall)"] == "2.50 s"
 
 
 def test_validation_keeps_acoustic_and_text_counts_separate():
