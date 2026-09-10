@@ -7,10 +7,13 @@ on:
       - "main"
     paths:
       - "desktop/**"
+      - "!desktop/**/*.md"
       - ".github/workflows/desktop-check.yml"
   pull_request:
     paths:
       - "desktop/**"
+      - "!desktop/**/*.md"
+      - ".github/workflows/desktop-check.yml"
 
 jobs:
   check:
