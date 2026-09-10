@@ -2,7 +2,7 @@
 
 **Actualizada:** 9 de septiembre de 2026  
 **Rama:** `claude/voice-transcriber-multiplatform-6xifq1`  
-**Estado:** **CIERRE DE CÓDIGO/CI/EMPAQUETADO VERIFICADO**
+**Estado:** **CIERRE DE CÓDIGO, DOCUMENTACIÓN, CI Y EMPAQUETADO VERIFICADO**
 
 Esta auditoría registra el estado V5.2-performance y distingue lo comprobado por código/CI de lo que todavía necesita audio o hardware real.
 
@@ -12,24 +12,25 @@ Esta auditoría registra el estado V5.2-performance y distingue lo comprobado po
 
 Estado: **V5.2 implementado, probado y empaquetado**.
 
-- Python 3.9+.
-- Entry point `desktop/vtt_main.py`.
+- Python 3.9+; entrypoint `desktop/vtt_main.py`.
 - ASR: faster-whisper/CTranslate2.
 - Diarización: sherpa-onnx.
 - Modos globales Rápido/Equilibrado/Preciso/Personalizado.
 - Auto estructural + precheck acústico acotado + selección identity-aware.
 - Reutilización de modelos, motor, PCM y embeddings.
 - Identidad rival-aware y sonda barata antes del escaneo detallado de turnos largos.
+- Alineación palabra↔hablante con división interna de segmentos.
 - Conteos separados de sherpa / identidad / texto.
 - Métricas de identidad separadas en etapa final, evaluaciones ligeras y total acumulado.
 - JSON maestro schema v7.
+- DOCX V5.2 con rótulos y métricas coherentes con la versión efectiva.
 - Modelos sherpa protegidos por hashes auditados fijados en código.
-- `Desktop checks #69`: verde en Windows/macOS/Ubuntu.
-- `Desktop executables #8`: verde en Windows/macOS/Ubuntu.
+- `Desktop checks #73`: verde en Windows/macOS/Ubuntu.
+- `Desktop executables #9`: verde en Windows/macOS/Ubuntu.
 
 ### Android
 
-Estado: **ASR local funcional y build final verde; sin diarización del escritorio**.
+Estado: **ASR local funcional y build verde; sin diarización del escritorio**.
 
 - Kotlin + whisper.cpp/JNI, ARM64, minSdk 24.
 - Progreso/cancelación nativa y trabajo en `TranscribeViewModel`.
@@ -37,7 +38,7 @@ Estado: **ASR local funcional y build final verde; sin diarización del escritor
 - Audios >5 min por bloques de 90 s + 2 s de solapamiento.
 - JNI con handles opacos/shared_ptr; eliminada la fuga deliberada anterior.
 - whisper.cpp fijado al commit `8a9ad7844d6e2a10cddf4b92de4089d7ac2b14a9`.
-- `Android APK #26`: build debug, artefacto y release rodante verdes; release firmado omitido por ausencia de keystore, según diseño.
+- `Android APK #28`: build debug, artefacto y release rodante verdes; release firmado omitido por ausencia de keystore, según diseño.
 
 ## 2. Hallazgos históricos corregidos
 
@@ -69,13 +70,13 @@ Se ejecuta primero una sonda de tres ventanas. Solo los turnos heterogéneos pas
 
 Los reportes separan clusters sherpa, clusters tras identidad, hablantes con texto y clusters acústicos sin texto.
 
-### V52-07 [CORREGIDO EN AUDITORÍA] Migración de perfiles podía sobrescribir preferencias V5.1
+### V52-07 [CORREGIDO] Migración de perfiles podía sobrescribir preferencias V5.1
 
-La primera implementación interpretaba la ausencia de `global_profile` como Equilibrado. La migración ahora reconoce un preset solo si los tres controles restaurados coinciden exactamente; cualquier combinación propia queda en Personalizado. Se añadió prueba de regresión.
+La migración reconoce un preset solo si los tres controles restaurados coinciden exactamente; cualquier combinación propia queda en Personalizado. Existe prueba de regresión.
 
 ### V52-08 [CORREGIDO] Integridad de modelos sherpa dependía de TOFU
 
-Los assets históricos de k2-fsa siguen mostrando `digest=null`. Dos descargas independientes desde los assets oficiales reprodujeron los mismos hashes y se auditó además el ONNX extraído:
+Los assets históricos de k2-fsa muestran `digest=null`. Dos descargas independientes desde los assets oficiales reprodujeron los mismos hashes y se auditó además el ONNX extraído:
 
 ```text
 segmentación archive  24615ee884c897d9d2ba09bb4d30da6bb1b15e685065962db5b02e76e4996488
@@ -87,7 +88,7 @@ VtT valida tamaño + hash antes de promover la descarga y valida el ONNX extraí
 
 ### V52-09 [CORREGIDO] GitHub Actions antiguas/runtime Node 20
 
-Los workflows relevantes se actualizaron a revisiones actuales fijadas por SHA: checkout/setup-python/upload-artifact usan versiones con runtime moderno. Android conserva setup-java/setup-android/Gradle/release igualmente fijados por SHA.
+Los workflows relevantes usan revisiones actuales fijadas por SHA. Checkout/setup-python/upload-artifact usan runtime moderno; Android conserva setup-java/setup-android/Gradle/release igualmente fijados por SHA.
 
 ### V52-10 [CORREGIDO] Android: primera descarga GGML sin catálogo
 
@@ -101,21 +102,35 @@ Para >5 min se usa `decodeRange()` y ventanas de 90 s con 2 s de solapamiento. L
 
 El JNI usa identificadores opacos y registro `shared_ptr`; `nativeFree` puede retirar/liberar el Handle sin reintroducir use-after-free.
 
-### V52-13 [CORREGIDO EN CIERRE] `identity_wall_seconds` podía subcontar trabajo identity-aware
+### V52-13 [CORREGIDO] `identity_wall_seconds` podía subcontar trabajo identity-aware
 
-El tiempo total de diarización ya incluía todas las operaciones, pero la métrica específica `identity_wall_seconds` sumaba la etapa final y el precheck inicial, omitiendo evaluaciones ligeras adicionales usadas al comparar candidatos identity-aware. Se añadió `vtt_diarization_v52_metrics.py`, que acumula todas las invocaciones `_light_identity` y expone:
+`vtt_diarization_v52_metrics.py` acumula todas las evaluaciones ligeras `_light_identity` y separa:
 
 - `final_stage_wall_seconds`;
 - `light_identity_wall_seconds`;
 - `total_wall_seconds`.
 
-`identity_wall_seconds` queda igualado al total acumulado. Se añadió regresión que simula dos evaluaciones ligeras y comprueba que no se pierden ni duplican tiempos. No cambia la lógica acústica ni la selección de hablantes.
+`identity_wall_seconds` queda igualado al total acumulado. La regresión simula múltiples evaluaciones y comprueba que no se pierden ni duplican tiempos. No cambia la lógica acústica.
+
+### V52-14 [CORREGIDO EN REVISIÓN GENERAL] El Word V5.2 conservaba un rótulo V5.1
+
+El writer V5.2 hereda partes de `vtt_reporting_v51.py`; por ello una transcripción nueva podía mostrar `Control identidad V5.1` aunque el motor efectivo fuera V5.2. Además, el desglose final/ligero/total estaba disponible en metadatos, pero no era explícito en Word.
+
+`vtt_reporting_v52.py` corrige ahora el rótulo a `Control identidad V5.2` y expone `Identidad total (wall)`, `Identidad etapa final (wall)` e `Identidad ligera (wall)`. Se añadió regresión que crea un DOCX y comprueba tanto la ausencia del rótulo V5.1 como los tres valores. No se modifica diarización ni ASR.
+
+### V52-15 [CORREGIDO EN REVISIÓN GENERAL] Cambios Markdown disparaban CI pesada
+
+Los filtros anteriores `desktop/**` y `android/**` hacían que editar únicamente README/documentación dentro de esas carpetas ejecutara las matrices completas. Los workflows excluyen ahora `desktop/**/*.md` y `android/**/*.md`, manteniendo el archivo del workflow como trigger para validar cualquier modificación de CI. Esto reduce trabajo innecesario sin omitir cambios ejecutables.
+
+### V52-16 [ACLARADO] Firma Android tratada como conflicto técnico
+
+`android/RELEASE_SETUP.md` marcaba la ausencia de keystore de producción como `[CONFLICTO_ABIERTO]`. Se reclasificó como **PENDIENTE EXTERNO**: el código y workflow existen; falta una credencial que debe proporcionar/configurar el propietario. No se versiona ni se comparte la clave privada.
 
 ## 4. Verificaciones reproducibles V5.2
 
 ### Smoke acústico
 
-Workflow temporal ejecutado dos veces y eliminado después.
+Workflow temporal ejecutado y eliminado después.
 
 - 2 hablantes → 2 detectados.
 - 4 hablantes → 4 detectados.
@@ -140,42 +155,58 @@ Las cuatro salidas tuvieron similitud textual 1.000 frente a medium/Preciso en e
 
 ### Desktop checks final
 
-`Desktop checks #69`, run `34407637074`, commit `5d6ceece5b24a46cb1c25e269d1a175ddda025e3`: **success**. `py_compile` y `pytest` terminaron correctamente en Ubuntu, Windows y macOS. Esta ejecución incluye `vtt_diarization_v52_metrics.py` y las regresiones de contabilidad completa de identidad.
+`Desktop checks #73`, run `34424880813`, commit `7905071096f0bb0478aa07d6b419546a57cb11b7`: **success**. Windows, Ubuntu y macOS pasaron `py_compile` y `pytest`. Esta ejecución incluye la corrección del DOCX V5.2, su regresión y la nueva configuración de filtro documental.
 
 ### Android final
 
-`Android APK #26`, commit `1f6bf9ea8cbca01cc19264dabd2718e49f85e311`: **success**.
+`Android APK #28`, run `34424903439`, commit `5f51ae8c197cbd7ec8a72eb8e9c93e1532b2713a`: **success**.
 
 - build debug: success;
 - upload del APK: success;
 - release rodante: success;
-- job release firmado: sin keystore, pasos de firma omitidos explícitamente.
+- job release firmado: detección de ausencia de keystore correcta; pasos de firma omitidos según diseño.
 
-### PyInstaller V5.2 final
+Esta ejecución valida además el workflow con el nuevo filtro de documentación; no introduce un cambio funcional Android posterior al build funcional ya auditado.
 
-`Desktop executables #8`, run `34407796151`, commit de build `5b2703d44f5196aa70769ae54ae6d945dab90d26`: **success** en Windows, Ubuntu y macOS.
+### PyInstaller V5.2 final tras revisión general
+
+`Desktop executables #9`, run `34425016894`, commit de build `2156cae37ca2ecbaec5c57081d6f6c3409086e10`: **success** en Windows, Ubuntu y macOS.
 
 Artefactos:
 
 ```text
-Windows  126.869.051 bytes  sha256:6d949ec154ed831631f99bf865c75a7261ade18ba546dfccd78ad828d6be8438
-Ubuntu   186.195.924 bytes  sha256:3c38cc9f16e67fc919d41bc0d560b8d310e662528a65336c28d4175843594e9d
-macOS    198.803.581 bytes  sha256:9f495afc5e0f11cac65fb188f5aa5764ceaa15324fe53ea6ab375b303f4f2890
+Windows  126.869.660 bytes  sha256:da874a760725d77526a8358dd44751988d0c79c4d04f72576871d3d66a74d8e5
+Ubuntu   186.194.313 bytes  sha256:577d937bbe8ec7205bfadab540f16d1f4b52d7bd0e066df16c5198ee1e631121
+macOS    198.803.059 bytes  sha256:6f2f2f6b9bff8eb34d68ee8cd4446c1c420deef796f3340df4ef71df250323bd
 ```
 
-Expiran el 8 de diciembre de 2026.
+Expiran el 9 de diciembre de 2026.
 
 ### Limpieza
 
 - workflow temporal acústico/hash/benchmark: eliminado;
-- trigger temporal de `desktop-build.yml`: retirado;
-- `desktop-build.yml` restaurado exactamente al blob permanente `93d5121a6ec87c3fa05a9fff238749a567e479dc`, con `workflow_dispatch` como único disparador;
-- el árbol final conserva únicamente `android-build.yml`, `desktop-build.yml` y `desktop-check.yml` dentro de `.github/workflows`;
-- no quedan archivos temporales de validación en `.github/workflows`.
+- trigger temporal de `desktop-build.yml`: retirado después del build #9;
+- `desktop-build.yml` restaurado al blob permanente `93d5121a6ec87c3fa05a9fff238749a567e479dc`, con `workflow_dispatch` como único disparador;
+- el árbol permanente debe conservar únicamente `android-build.yml`, `desktop-build.yml` y `desktop-check.yml` dentro de `.github/workflows`.
 
-## 5. Límites que permanecen
+## 5. Documentación revisada
 
-No quedan como deuda de código los antiguos pendientes de bloques Android, pins de Actions, hashes esperados Android, fuga del Handle JNI ni contabilidad incompleta de tiempos de identidad.
+Se revisaron README raíz, README de escritorio, README Android, `MODEL_CATALOG.md`, `AGENTS.md`, `AUDITORIA.md`, `PLAN_MAESTRO.md`, `PRUEBAS_MANUALES.md` y `android/RELEASE_SETUP.md`.
+
+Actualizaciones principales:
+
+- mapa documental y estructura V5.2 explícitos;
+- cadena V4/V5/V5.1 documentada como herencia/compatibilidad, no como múltiples entrypoints;
+- `vtt_diarization_v52_metrics.py` y servicio final incorporados al mapa técnico;
+- reglas para evitar rótulos de versión obsoletos en reportes;
+- distinción entre CI automatizada y validación acústica/hardware;
+- firma Android como dependencia externa y no error del producto.
+
+`MODEL_CATALOG.md` y `android/README.md` ya eran coherentes con los hashes, bloques Android y limitaciones actuales; no se cambian solo por incrementar una fecha.
+
+## 6. Límites que permanecen
+
+No quedan como deuda de código los antiguos pendientes de bloques Android, pins de Actions, hashes esperados Android, fuga del Handle JNI, contabilidad incompleta de tiempos de identidad ni rótulos V5.1 en nuevos DOCX V5.2.
 
 Requieren prueba externa/manual:
 
@@ -187,6 +218,8 @@ Requieren prueba externa/manual:
 - Android físico: empalmes largos, RAM, batería, temperatura y actualización firmada;
 - GPU CUDA en hardware compatible.
 
-## 6. Resultado de cierre
+La reproducibilidad Python con lock/hashes transitivos sigue siendo una mejora futura posible: requiere diseñar una matriz de wheels por SO/arquitectura y una política de actualización, no congelar un único runner.
+
+## 7. Resultado de cierre
 
 La rama queda **cerrada para código, pruebas automatizadas, smoke reproducible, hardening de modelos/workflows, documentación y empaquetado V5.2**. Lo pendiente es validación acústica o de hardware real y no debe declararse resuelto sin esa evidencia.
