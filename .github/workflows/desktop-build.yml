@@ -1,13 +1,8 @@
 name: Desktop executables
 
-# Trigger de push temporal para verificar el empaquetado de la revisión general.
+# Opcional: genera ejecutables independientes (no necesitan instalar Python).
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - "claude/voice-transcriber-multiplatform-6xifq1"
-    paths:
-      - ".github/workflows/desktop-build.yml"
 
 jobs:
   build:
