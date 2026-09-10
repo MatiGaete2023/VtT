@@ -115,9 +115,11 @@ Un cluster acústico sin palabras alineadas no desaparece de la trazabilidad: qu
 
 Cada palabra se cruza con los turnos acústicos. Un segmento Whisper puede dividirse internamente si cambia la voz. Existe fallback por segmento cuando faltan palabras temporizadas.
 
-## 8. Worker y rendimiento
+## 8. Worker, métricas y rendimiento
 
 El worker persistente permite reutilizar modelos y motor entre archivos compatibles. V5.2 además evita una segunda decodificación para identidad y comparte un caché de embeddings durante precheck, selección y validación final.
+
+La ruta final usa `vtt_diarization_v52_metrics.py` sobre el motor V5.2. Esta capa no modifica el resultado acústico: corrige la contabilidad temporal para que todas las evaluaciones `_light_identity` realizadas durante precheck/selección se incorporen al tiempo de identidad.
 
 JSON/DOCX registra, según disponibilidad:
 
@@ -128,9 +130,15 @@ JSON/DOCX registra, según disponibilidad:
 - wall por cada pasada sherpa;
 - timers internos sherpa cuando el backend los expone/captura;
 - precheck y si evitó el reintento;
-- tiempo/llamadas de embeddings de identidad;
+- embeddings de identidad y uso de caché;
+- `final_stage_wall_seconds`: wall de la verificación final;
+- `light_identity_wall_seconds`: suma de evaluaciones ligeras del job;
+- `total_wall_seconds`: suma anterior completa;
+- `identity_wall_seconds`: alias del total acumulado para compatibilidad;
 - conteos por etapa;
 - presupuesto `processing_seconds <= audio_seconds`.
+
+El Word V5.2 muestra **Control identidad V5.2**, `Identidad total (wall)`, `Identidad etapa final (wall)` e `Identidad ligera (wall)`. Los documentos creados por versiones anteriores pueden conservar etiquetas históricas; VtT no reescribe transcripciones antiguas automáticamente.
 
 El objetivo de tiempo real es un indicador por equipo, no una garantía universal.
 
@@ -164,7 +172,7 @@ ASR, diarización e identidad son locales. La red se usa para dependencias, prim
 
 ## 12. Verificación automatizada
 
-`Desktop checks` ejecuta `py_compile` y `pytest` en Windows, macOS y Ubuntu. La suite incluye V5.2, migración de perfiles, identidad rival-aware, precheck Auto, conteos separados, reporting e integridad de modelos.
+`Desktop checks` ejecuta `py_compile` y `pytest` en Windows, macOS y Ubuntu. La suite incluye V5.2, migración de perfiles, identidad rival-aware, precheck Auto, conteos separados, reporting, contabilidad temporal e integridad de modelos.
 
 La campaña reproducible V5.2 con audios oficiales sherpa-onnx confirmó:
 
@@ -175,7 +183,7 @@ La campaña reproducible V5.2 con audios oficiales sherpa-onnx confirmó:
 
 El benchmark público `jfk.flac` confirmó que las cuatro combinaciones ASR se ejecutan; no constituye una evaluación de precisión para español ni del audio real del usuario.
 
-`Desktop executables` construye PyInstaller para Windows, macOS y Ubuntu. Las Actions se fijan por SHA.
+`Desktop executables` construye PyInstaller para Windows, macOS y Ubuntu. Las Actions se fijan por SHA. Los identificadores de las campañas de cierre se mantienen en `../AUDITORIA.md` para evitar que esta guía operativa quede obsoleta en cada build.
 
 ## 13. Problemas frecuentes
 
