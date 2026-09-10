@@ -2,7 +2,7 @@
 
 **Actualizado:** 9 de septiembre de 2026  
 **Rama de trabajo:** `claude/voice-transcriber-multiplatform-6xifq1`  
-**Estado:** **V5.2-performance — CIERRE TÉCNICO VERIFICADO**
+**Estado:** **V5.2-performance — CIERRE TÉCNICO Y DOCUMENTAL VERIFICADO**
 
 ## 1. Objetivo
 
@@ -20,11 +20,12 @@ VtT ofrece transcripción local y privada en escritorio Windows/macOS/Linux y An
 - Auto estructural + precheck acústico presupuestado + selección identity-aware.
 - worker persistente y reutilización de PCM/embeddings.
 - sonda de turnos largos antes del escaneo detallado.
+- alineación palabra↔hablante y división interna de segmentos.
 - conteos sherpa / identidad / texto separados.
 - contabilidad de identidad separa etapa final, evaluaciones ligeras y total acumulado.
-- JSON schema v7 y DOCX diagnóstico.
+- JSON schema v7 y DOCX diagnóstico V5.2 coherente con la versión efectiva.
 - modelos sherpa con tamaño y SHA-256 auditado fijado en código.
-- `Desktop checks #69` y `Desktop executables #8` verdes en Windows/macOS/Ubuntu.
+- `Desktop checks #73` y `Desktop executables #9` verdes en Windows/macOS/Ubuntu.
 
 ### Android
 
@@ -35,7 +36,7 @@ VtT ofrece transcripción local y privada en escritorio Windows/macOS/Linux y An
 - audios >5 min por bloques de 90 s con 2 s de solapamiento.
 - handles JNI opacos/liberables con shared_ptr/mutex.
 - whisper.cpp fijado a commit exacto.
-- Android APK final verde.
+- `Android APK #28` verde.
 - sin diarización por diseño actual.
 
 ## 3. Reglas transversales
@@ -50,6 +51,8 @@ VtT ofrece transcripción local y privada en escritorio Windows/macOS/Linux y An
 8. Mantener modularidad de escritorio.
 9. Todo cambio funcional debe tener verificación prevista y posterior.
 10. Retirar infraestructura temporal tras recopilar evidencia.
+11. Un reporte generado por V5.2 no debe exponer rótulos V5.1 salvo contexto histórico explícito.
+12. Cambios solo documentales no deben disparar matrices pesadas cuando pueden excluirse de forma segura.
 
 ## 4. Fases cerradas
 
@@ -95,11 +98,25 @@ Cerrado:
 - handle JNI sin fuga deliberada;
 - Actions fijadas por SHA.
 
+### F7 — Coherencia documental y de reporting
+
+Cerrado:
+
+- README raíz y guía de escritorio actualizados a la arquitectura efectiva V5.2;
+- mapa documental explícito;
+- módulos V4/V5/V5.1 descritos como cadena de herencia/compatibilidad;
+- `vtt_diarization_v52_metrics.py` y servicio V5.2 incorporados a la documentación técnica;
+- DOCX nuevo renombra `Control identidad V5.1` a `Control identidad V5.2`;
+- DOCX expone wall total/final/ligero de identidad;
+- regresión automática del reporte Word;
+- firma Android reclasificada como pendiente externo, no conflicto de código;
+- cambios Markdown excluidos de las matrices pesadas de escritorio/Android, manteniendo los workflows como triggers de su propia validación.
+
 ## 5. Verificación de cierre
 
 ### Desktop checks
 
-`Desktop checks #69`, run `34407637074`, sobre `5d6ceece5b24a46cb1c25e269d1a175ddda025e3`: Windows/macOS/Ubuntu **success**. Incluye la regresión que verifica la suma de todas las llamadas ligeras de identidad y el nuevo módulo `vtt_diarization_v52_metrics.py` en `py_compile`.
+`Desktop checks #73`, run `34424880813`, sobre `7905071096f0bb0478aa07d6b419546a57cb11b7`: Windows/macOS/Ubuntu **success**. Incluye las regresiones V5.2, el DOCX actualizado y la configuración de filtro documental del workflow.
 
 ### Smoke V5.2
 
@@ -122,17 +139,17 @@ Las cuatro combinaciones de `benchmark_asr.py` ejecutaron sobre `jfk.flac`. No e
 
 ### Android
 
-`Android APK #26` sobre `1f6bf9ea8cbca01cc19264dabd2718e49f85e311`: build debug, artefacto y release rodante **success**. Firma opcional no ejecutada por ausencia de keystore.
+`Android APK #28`, run `34424903439`, sobre `5f51ae8c197cbd7ec8a72eb8e9c93e1532b2713a`: build debug, artefacto y release rodante **success**. Firma opcional no ejecutada por ausencia de keystore.
 
 ### PyInstaller V5.2
 
-`Desktop executables #8`, run `34407796151`, commit `5b2703d44f5196aa70769ae54ae6d945dab90d26`: Windows/macOS/Ubuntu **success**.
+`Desktop executables #9`, run `34425016894`, commit `2156cae37ca2ecbaec5c57081d6f6c3409086e10`: Windows/macOS/Ubuntu **success**.
 
-El trigger temporal se retiró y `desktop-build.yml` volvió exactamente al blob permanente `93d5121a6ec87c3fa05a9fff238749a567e479dc`, con `workflow_dispatch` como único disparador.
+El trigger temporal se retiró y `desktop-build.yml` volvió al blob permanente `93d5121a6ec87c3fa05a9fff238749a567e479dc`, con `workflow_dispatch` como único disparador.
 
 ## 6. Pendientes sin necesidad de modificar código ahora
 
-No queda una tarea técnica de la fase V5.2 que pueda cerrarse únicamente con más revisión estática/CI sin cambiar el objetivo del producto.
+No queda una tarea técnica o documental de V5.2 que pueda cerrarse únicamente con más revisión estática/CI sin cambiar el objetivo del producto.
 
 La reproducibilidad Python con lock/hashes transitivos sigue siendo una posible mejora futura: requiere diseñar una matriz de wheels por SO/arquitectura y una política de actualización, no simplemente congelar el entorno de un único runner.
 
