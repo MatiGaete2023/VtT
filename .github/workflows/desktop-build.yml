@@ -1,6 +1,6 @@
 name: Windows Ultra executable
 
-# Trigger temporal para validar el ejecutable tras incorporar Ultra Calidad 90s.
+# Trigger temporal final: empaqueta el código Ultra Calidad 90s ya verificado en Windows.
 on:
   push:
     branches:
