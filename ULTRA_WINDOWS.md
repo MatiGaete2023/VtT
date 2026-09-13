@@ -2,47 +2,115 @@
 
 Rama: `windows-ultra-fast`
 
-Esta variante existe para un objetivo distinto de V5.2.1 estable: **terminar lo antes posible en Windows CPU**, manteniendo transcripción local, timestamps útiles e intento de separación de hablantes.
+Esta variante existe para un objetivo distinto de V5.2.1 estable: **procesar lo antes posible en Windows CPU**, manteniendo transcripción local, timestamps útiles e intento de separación de hablantes.
 
-## Configuración por defecto
+## 1. Modos disponibles
 
-- modelo Whisper: `tiny`;
-- ASR: `Rápido`;
-- batching: 8;
-- beam: 1;
-- hablantes: `Auto`;
-- diarización: `Ultrarrápida`;
-- `window_shift_ratio`: `0.35`;
-- threshold Auto único: `0.82`;
-- pasadas Sherpa: **1**;
-- verificación V5.2 de identidad: **omitida**;
-- alineación voz/texto: máximo solapamiento por **segmento ASR**;
-- timestamps por palabra: no se fuerzan. Si el usuario los activa manualmente, se respetan.
+### Ultra Máxima
 
-## Qué conserva
+Ruta de borrador inmediato:
 
-- ejecución local/offline;
-- checkpoint ASR recuperable antes de diarización;
-- timestamps de inicio/fin de cada segmento;
-- etiquetas `Persona N` cuando Sherpa logra separar clusters;
-- reducción de diarización a regiones donde ASR detectó voz cuando es seguro;
-- worker persistente y reutilización de modelos Sherpa;
-- cancelación normal;
-- TXT, Markdown, SRT, VTT, JSON y Word;
-- métricas de ASR, Sherpa, exportación y tiempo extremo a extremo.
+- Whisper `tiny`;
+- ASR `Rápido`;
+- batch 8 / beam 1;
+- hablantes `Auto`;
+- diarización `Ultrarrápida`;
+- `window_shift_ratio = 0.35`;
+- threshold Auto único `0.82`;
+- **1 pasada Sherpa**;
+- sin identidad V5.2;
+- alineación por segmento ASR;
+- timestamps por palabra no forzados.
 
-## Qué sacrifica para ser más rápida
+### Ultra Calidad 90s
 
-1. No realiza una segunda pasada Sherpa aunque Auto parezca dudoso.
-2. No ejecuta la verificación/refinamiento de identidad V5.2.
-3. No fuerza timestamps por palabra solo para diarización.
-4. Un cambio de voz dentro de un segmento Whisper puede quedar bajo una sola `Persona N`.
-5. `shift 0.35` tiene menor resolución temporal que Rápida 0.25 / Equilibrada 0.20.
-6. Auto es una estimación rápida; JSON/Word lo marca como `estimacion_ultra_una_pasada`.
+Ruta que usa deliberadamente parte del margen de velocidad para recuperar calidad:
 
-La variante no debe utilizarse cuando la separación fina de hablantes sea más importante que la velocidad. Para esos casos usar la rama V5.2.1 estable.
+- Whisper `base`;
+- ASR `Rápido`;
+- batch 8 / beam 1;
+- hablantes `Auto`;
+- misma diarización `Ultrarrápida 0.35`;
+- mismo threshold Auto `0.82`;
+- **1 pasada Sherpa**;
+- timestamps por palabra activados internamente;
+- alineación palabra ↔ turno Sherpa y división de segmentos cuando cambia la voz;
+- identidad acústica ligera: máximo 10 embeddings y máximo 2 por cluster;
+- puede reconciliar clusters existentes, pero no crea identidades nuevas;
+- sin segunda pasada Sherpa;
+- sin escaneo largo V5.2;
+- re-ASR selectivo con modelo superior **desactivado hasta medir el presupuesto real**.
 
-## Windows
+La elección entre los dos modos Ultra se conserva entre sesiones. Una configuración histórica ajena a esta rama se migra a Ultra Máxima.
+
+## 2. Motivo del modo Calidad
+
+La primera prueba real de Ultra Máxima se hizo con el mismo video de referencia de 6:44 (404,004 s) en el PC institucional Windows.
+
+Resultados:
+
+- carga modelo: 8,86 s;
+- ASR: 10,32 s;
+- diarización completa: 41,51 s;
+- Sherpa `process()` wall: 33,77 s;
+- procesamiento: 51,84 s;
+- extremo a extremo: 60,77 s;
+- velocidad: 7,79× tiempo real;
+- Sherpa encontró 6 clusters acústicos y 40 turnos;
+- Whisper produjo 15 segmentos;
+- solo 3 clusters terminaron asociados a texto.
+
+El diagnóstico fue que la velocidad ya era sobrada; la pérdida principal estaba en la **alineación por segmento**: cada segmento Whisper largo recibía un único hablante aunque Sherpa hubiera detectado cambios de voz dentro de él.
+
+Por eso Ultra Calidad 90s no añade otra pasada acústica. Aprovecha mejor la información que la primera pasada ya calculó.
+
+## 3. Presupuesto de diseño
+
+Para Ultra Calidad se usa una referencia de:
+
+`processing_seconds <= 0.22 × duración del audio`
+
+En el video patrón:
+
+`404 s × 0.22 ≈ 88,9 s`
+
+Es un **objetivo de diseño**, no una garantía. Solo una nueva prueba en el PC institucional puede demostrar el tiempo efectivo.
+
+Ultra Máxima conserva su referencia más amplia de `0.60 × duración`, aunque la prueba real quedó muy por debajo.
+
+## 4. Identidad ligera
+
+La identidad ligera reutiliza el PCM que Sherpa ya decodificó y el mismo modelo de embeddings. Tiene un tope duro de trabajo:
+
+- máximo 10 embeddings por archivo;
+- máximo 2 embeddings por cluster;
+- sin escaneo detallado de turnos largos;
+- `allow_new_identities=False`;
+- sin precheck para decidir otra pasada, porque Ultra nunca repite Sherpa.
+
+Su finalidad no es convertir Auto en ground truth. Solo intenta reconciliar inconsistencias evidentes con un costo acotado.
+
+## 5. Alineación de hablantes
+
+Ultra Máxima mantiene `segment_overlap`.
+
+Ultra Calidad usa `vtt_alignment.alinear_y_dividir()`:
+
+1. Whisper entrega timestamps por palabra;
+2. cada palabra se cruza temporalmente con los turnos Sherpa;
+3. se suavizan flips interiores extremadamente breves;
+4. el segmento se divide cuando la secuencia de palabras cambia de hablante;
+5. los timestamps por palabra pueden ser internos: si el usuario no los pidió como salida, se eliminan antes de exportar.
+
+Esto busca recuperar en texto clusters que Ultra Máxima detectaba acústicamente pero perdía al asignar cada segmento completo a una sola Persona.
+
+## 6. Qué no se implementó todavía
+
+No se activó re-ASR selectivo con `base`/`small` sobre fragmentos dudosos. El modo Calidad ya cambia el ASR principal de `tiny` a `base`; antes de añadir una segunda transcripción parcial necesitamos saber cuánto tarda realmente esta combinación en el PC institucional.
+
+Si la prueba queda holgadamente bajo 90 s, el siguiente candidato será dedicar parte del margen a re-ASR selectivo de los segmentos con peor confianza.
+
+## 7. Windows
 
 Objetivo principal: Windows 10/11, CPU `int8`, sin privilegios de administrador.
 
@@ -58,62 +126,64 @@ o:
 python run.py
 ```
 
-El título de la aplicación indica `VtT Ultra Windows` para evitar confundirla con la versión estable.
+El selector `Modo global` ofrece `Ultrarrápido` y `Ultra Calidad 90s`.
 
-## Criterio de rendimiento
+## 8. Verificación automatizada — 13/09/2026
 
-El preset Ultra usa un objetivo orientativo de `processing_seconds <= 0.60 * audio_seconds`. No es una garantía. El hardware institucional debe medirse con el mismo archivo utilizado en campañas anteriores.
+### Windows Ultra checks #104
 
-Para un audio de 6:44 (404 s), el objetivo nominal es aproximadamente 242 s de procesamiento. La rama no repite Sherpa para intentar alcanzar ese objetivo.
+Run `34732920777`, commit funcional `1016029928b9127348c615f0f66468498d9aa82b`: **success**.
 
-## Verificación automatizada — 13/09/2026
+Se ejecutaron `py_compile` y **105 pruebas**, todas correctas. La suite incluye regresiones para:
 
-### Windows Ultra checks
+- ambos presets Ultra;
+- Ultra Máxima sin timestamps por palabra forzados;
+- Ultra Calidad con timestamps por palabra internos;
+- una sola pasada y `adaptive=False`;
+- identidad ligera solo en Calidad;
+- división palabra ↔ hablante;
+- conservación separada de clusters Sherpa, clusters tras identidad y hablantes con texto;
+- salida Auto marcada como estimación limitada;
+- persistencia de la elección del modo Ultra.
 
-La ruta final de código quedó verificada en Windows con `py_compile` y la suite completa de pruebas. La campaña final incorporó las regresiones Ultra y comprobó, entre otros puntos:
+### PyInstaller Windows — executable #14
 
-- preset `tiny + Rápido + Auto + Ultrarrápida`;
-- no forzar timestamps por palabra;
-- threshold Auto 0.82;
-- conservación de clusters acústicos sin texto;
-- una sola llamada Sherpa con `adaptive=False`;
-- sin retry solicitado/evitado;
-- sin refinamiento de identidad V5.2;
-- alineación por segmento;
-- salida Auto marcada como estimación Ultra ambigua.
-
-El worker persistente instala explícitamente el perfil `Ultrarrápida` dentro del proceso hijo `spawn`, evitando que Windows/PyInstaller caigan silenciosamente al perfil Equilibrado.
-
-### PyInstaller Windows
-
-`Windows Ultra executable #12`, run `34731116065`: **success**.
+Run `34733015747`, commit de build `e41ce37267ff8a8651fc8459f2f5aba088b07de2`: **success**.
 
 Artefacto GitHub Actions:
 
 ```text
 VtT-Ultra-Windows
-127.416.750 bytes
-sha256:38b2bc64572f2de1f476db085154ff73d77552e6c25403c121ccacbe0a769821
+127.425.214 bytes
+sha256:6ad24ec13669363b5574fec1831021eeede01a69e74569ea6f8098e1abf929d7
 expira: 12 de diciembre de 2026
 ```
 
-El SHA anterior corresponde al ZIP/artefacto publicado por GitHub Actions, no a una firma Authenticode del `.exe` interior.
+El digest corresponde al artefacto/ZIP publicado por GitHub Actions; no es una firma Authenticode del `.exe` interior.
 
-El workflow de build quedó nuevamente en ejecución manual (`workflow_dispatch`), sin trigger temporal de push.
+Después del empaquetado, `.github/workflows/desktop-build.yml` fue restaurado a ejecución manual (`workflow_dispatch`) con su contenido permanente.
 
-## Qué medir en la prueba real
+## 9. Próxima prueba real
 
-Registrar:
+Usar exactamente el mismo video de 6:44 y el mismo PC institucional, seleccionando:
 
-- carga del modelo;
+`Modo global: Ultra Calidad 90s`
+
+Guardar al menos JSON y Word.
+
+Comparar con Ultra Máxima:
+
+- carga de modelo;
 - ASR;
 - diarización;
-- `sherpa_process_wall_seconds`;
-- segmentación/embeddings/clustering internos si están disponibles;
-- cantidad de clusters acústicos;
-- cantidad de `Persona N` con texto;
-- tiempo total;
-- `processing_to_audio`;
-- errores evidentes de cambio de voz dentro de un segmento.
+- identidad ligera;
+- procesamiento y extremo a extremo;
+- segmentos ASR de entrada vs segmentos finales;
+- cambios internos detectados;
+- clusters Sherpa;
+- clusters tras identidad ligera;
+- Personas con texto;
+- clusters acústicos sin texto;
+- calidad léxica visible.
 
-Comparar siempre contra el mismo audio y el mismo PC.
+Criterio experimental principal: comprobar si mejora materialmente texto y separación de voces manteniendo el procesamiento aproximadamente en **90 s o menos**.
