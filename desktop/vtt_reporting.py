@@ -21,7 +21,16 @@ def _segundos(metricas: Mapping[str, Any], clave: str) -> float:
 
 
 def cerrar_metricas(metricas: Mapping[str, Any]) -> Dict[str, Any]:
-    """Normaliza tiempos de etapas y recalcula total, RTF y velocidad."""
+    """Normaliza tiempos y recalcula siempre los totales derivados.
+
+    ``processing_seconds`` mide el trabajo funcional del archivo: ASR,
+    diarización, exportaciones no-report y overhead. La generación final de
+    reportes se registra aparte para evitar la paradoja de reescribir un
+    informe para incluir el tiempo de su propia escritura.
+
+    ``end_to_end_seconds`` añade carga de modelo + procesamiento + generación
+    de reportes y representa mejor la espera percibida por el usuario.
+    """
     m = dict(metricas)
     audio = _segundos(m, "audio_seconds")
     asr = _segundos(m, "asr_seconds")
@@ -29,7 +38,9 @@ def cerrar_metricas(metricas: Mapping[str, Any]) -> Dict[str, Any]:
     export = _segundos(m, "export_seconds")
     overhead = _segundos(m, "overhead_seconds")
     model_load = _segundos(m, "model_load_seconds")
+    report = _segundos(m, "report_generation_seconds")
     total = asr + diar + export + overhead
+    end_to_end = model_load + total + report
     m["processing_seconds"] = total
     m["rtf"] = total / audio if audio > 0 else None
     m["speed_x"] = audio / total if total > 0 else None
@@ -38,6 +49,8 @@ def cerrar_metricas(metricas: Mapping[str, Any]) -> Dict[str, Any]:
     m["export_seconds"] = export
     m["overhead_seconds"] = overhead
     m["model_load_seconds"] = model_load
+    m["report_generation_seconds"] = report
+    m["end_to_end_seconds"] = end_to_end
     return m
 
 
@@ -85,7 +98,9 @@ def documento_json_detallado(
         "diarization_seconds": m.get("diarization_seconds", 0.0),
         "export_seconds": m.get("export_seconds", 0.0),
         "overhead_seconds": m.get("overhead_seconds", 0.0),
+        "report_generation_seconds": m.get("report_generation_seconds", 0.0),
         "processing_seconds": m.get("processing_seconds", 0.0),
+        "end_to_end_seconds": m.get("end_to_end_seconds", 0.0),
         "rtf": m.get("rtf"),
         "speed_x": m.get("speed_x"),
     }
@@ -155,8 +170,10 @@ def escribir_docx_detallado(
         ("Transcripción ASR", core.ts_simple(_segundos(m, "asr_seconds"))),
         ("Identificación hablantes", core.ts_simple(_segundos(m, "diarization_seconds"))),
         ("Exportación", core.ts_simple(_segundos(m, "export_seconds"))),
+        ("Generación informe", core.ts_simple(_segundos(m, "report_generation_seconds"))),
         ("Otros", core.ts_simple(_segundos(m, "overhead_seconds"))),
         ("Procesamiento", core.ts_simple(_segundos(m, "processing_seconds"))),
+        ("Espera extremo a extremo", core.ts_simple(_segundos(m, "end_to_end_seconds"))),
         ("Velocidad", f"{float(m.get('speed_x', 0.0) or 0.0):.2f}× tiempo real"),
     ]
     if m.get("auto_threshold") is not None:
