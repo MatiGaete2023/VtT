@@ -10,10 +10,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 import vtt_diarization_v51 as diar51
-
-
-class DiarizacionCancelada(Exception):
-    pass
+from vtt_diarization_errors import DiarizacionCancelada
 
 
 def _worker_loop(carpeta_modelos: str, comandos, eventos) -> None:
@@ -65,10 +62,8 @@ class PersistentDiarizationService:
             proc.terminate(); proc.join(timeout=3)
         for q in (self.comandos, self.eventos):
             if q is not None:
-                try:
-                    q.close(); q.join_thread()
-                except Exception:
-                    pass
+                try: q.close(); q.join_thread()
+                except Exception: pass
         self.proc = self.comandos = self.eventos = None
 
     def shutdown(self) -> None:
@@ -86,6 +81,7 @@ class PersistentDiarizationService:
         log: Optional[Callable[[str], None]] = None,
         progreso: Optional[Callable[[float], None]] = None,
         cancelado: Optional[Callable[[], bool]] = None,
+        time_budget_seconds: Optional[float] = None,
     ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
         log, progreso, cancelado = log or (lambda _: None), progreso or (lambda _: None), cancelado or (lambda: False)
         self._start(); self.counter += 1
@@ -97,7 +93,7 @@ class PersistentDiarizationService:
             "cmd": "diarize", "job_id": job_id, "ruta": str(ruta),
             "num_speakers": int(num_speakers), "threshold": float(threshold),
             "speech_regions": regiones, "adaptive": bool(adaptive),
-            "diar_profile": str(diar_profile),
+            "diar_profile": str(diar_profile), "time_budget_seconds": time_budget_seconds,
         })
         while True:
             if cancelado():
