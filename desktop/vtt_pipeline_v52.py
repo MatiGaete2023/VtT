@@ -4,13 +4,14 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Dict, List, Mapping
 
 import transcriptor_whisper as base
 import vtt_core as core
 import vtt_diarization_service_v52 as dservice52
 import vtt_performance as perf
 import vtt_pipeline_v51 as v51
+import vtt_reporting as reporting_base
 import vtt_reporting_v52 as reporting52
 import vtt_validation_v52 as validation52
 
@@ -25,6 +26,24 @@ class PipelineV52Mixin(v51.PipelineV51Mixin):
             self._v52_diar_service = svc
         return svc
 
+    def _prepare_diarization_opts(self, dur: float, asr_seconds: float, opts):
+        out = dict(opts)
+        mode = str(getattr(self, "_global_profile_run", "Personalizado") or "Personalizado")
+        if bool(out.get("diarizar")) and str(out.get("num_speakers", "Auto")) == "Auto":
+            budget = perf.diarization_budget_seconds(
+                audio_seconds=dur,
+                asr_seconds=asr_seconds,
+                profile_name=mode,
+            )
+            if budget is not None:
+                out["_diar_time_budget_seconds"] = float(budget)
+                self.cola.put((
+                    "log",
+                    f"Presupuesto Auto ({mode}): hasta {base.ts_simple(budget)} para diarización "
+                    "antes de decidir si conviene repetir sherpa.",
+                ))
+        return out
+
     def _diarizar_pipeline(self, archivo: str, segs, dur: float, opts, log):
         asignados, speakers, meta = super()._diarizar_pipeline(
             archivo, segs, dur, opts, log
@@ -35,10 +54,16 @@ class PipelineV52Mixin(v51.PipelineV51Mixin):
         raw = int(
             meta.get("raw_sherpa_selected_speakers")
             or meta.get("detected_speakers_before_identity")
+            or meta.get("detected_speakers_engine")
             or meta.get("detected_speakers")
             or 0
         )
-        identity_n = int(meta.get("detected_speakers", raw) or raw)
+        engine_identity_n = int(
+            meta.get("detected_speakers_engine")
+            or meta.get("detected_speakers")
+            or raw
+            or 0
+        )
         text_n = len(speakers or [])
         assigned_raw = {
             int(s.get("raw_numeric_id")) for s in (speakers or [])
@@ -48,13 +73,21 @@ class PipelineV52Mixin(v51.PipelineV51Mixin):
             int(s.get("speaker")) for s in (consistency.get("speakers") or [])
             if s.get("speaker") is not None
         }
+        identity_n = len(all_identity_raw) if all_identity_raw else engine_identity_n
         unassigned = sorted(all_identity_raw - assigned_raw)
+        assigned_without_identity = sorted(assigned_raw - all_identity_raw) if all_identity_raw else []
         counts = {
             "raw_acoustic_clusters": raw,
+            "engine_identity_clusters": engine_identity_n,
+            "identity_consistency_clusters": len(all_identity_raw),
             "identity_clusters_after_refinement": identity_n,
             "text_assigned_speakers": text_n,
             "unassigned_acoustic_clusters": len(unassigned),
             "unassigned_raw_ids": unassigned,
+            "text_ids_missing_from_identity_audit": assigned_without_identity,
+            "identity_count_mismatch": bool(
+                all_identity_raw and engine_identity_n != len(all_identity_raw)
+            ),
         }
         meta["speaker_counts"] = counts
 
@@ -65,11 +98,21 @@ class PipelineV52Mixin(v51.PipelineV51Mixin):
             text_speakers=text_n, unassigned_raw_ids=unassigned,
             manual_requested=requested,
         )
-        if raw != text_n:
+        if meta.get("retry_skipped_budget"):
+            meta["speaker_count_validation"]["ambiguous"] = True
+            meta["speaker_count_validation"]["budget_limited"] = True
+            meta["speaker_count_validation"]["status"] = "estimacion_ambigua_presupuesto"
+
+        if raw != identity_n or identity_n != text_n or unassigned:
             log(
                 "Conteo V5.2: "
-                f"{raw} cluster(s) acústico(s) seleccionado(s) · "
-                f"{identity_n} tras identidad · {text_n} con texto."
+                f"sherpa {raw} · identidad {identity_n} · con texto {text_n} · "
+                f"sin texto {unassigned or 'ninguno'}."
+            )
+        if counts["identity_count_mismatch"]:
+            log(
+                "Diagnóstico: el conteo resumido del motor difiere del conjunto de "
+                "identidades auditadas; se usa el conjunto explícito para el reporte."
             )
         if meta["speaker_count_validation"].get("ambiguous"):
             log("Auto V5.2: resultado ambiguo; se conserva trazabilidad completa en JSON/Word.")
@@ -91,18 +134,59 @@ class PipelineV52Mixin(v51.PipelineV51Mixin):
             m["speaker_detected"] = int(
                 counts.get("identity_clusters_after_refinement", m.get("speaker_detected", 0)) or 0
             )
-            m["speaker_text_assigned"] = int(counts.get("text_assigned_speakers", len(speakers or [])) or 0)
+            m["speaker_text_assigned"] = int(
+                counts.get("text_assigned_speakers", len(speakers or [])) or 0
+            )
         m.update({
             "speaker_counts": counts,
             "speaker_count_validation": diar_meta.get("speaker_count_validation") or {},
             "auto_precheck": diar_meta.get("auto_precheck") or {},
             "auto_retry_requested": bool(diar_meta.get("retry_requested", False)),
             "auto_retry_avoided": bool(diar_meta.get("retry_avoided", False)),
+            "auto_retry_skipped_budget": bool(diar_meta.get("retry_skipped_budget", False)),
+            "diarization_time_budget_seconds": diar_meta.get("time_budget_seconds"),
             "identity_aware_selection": diar_meta.get("identity_aware_selection") or {},
             "global_profile": getattr(self, "_global_profile_run", None),
         })
+        return self._recalcular_metricas_finales(m)
+
+    def _recalcular_metricas_finales(self, metricas: Mapping[str, Any]):
+        m = reporting_base.cerrar_metricas(metricas)
         m["performance"] = perf.performance_status(m)
         return m
+
+    def _escribir_vtt_detallado(
+        self, out, archivo, modelo, idioma, texto, segs,
+        bloques, speakers, metricas, formatos, perfil, glosario,
+    ):
+        """V5.2 difiere JSON/DOCX hasta que los tiempos funcionales sean finales."""
+        out.mkdir(parents=True, exist_ok=True)
+        tronco = self._tronco_salida_disponible(out, archivo, formatos)
+        escritos: List[str] = []
+        paths: Dict[str, str] = {}
+
+        def p(ext):
+            return tronco.with_name(tronco.name + "." + ext)
+
+        if formatos.get("txt"):
+            x = p("txt"); x.write_text(core.texto_bloques(bloques), encoding="utf-8")
+            escritos.append(x.name); paths["txt"] = str(x)
+        if formatos.get("md"):
+            x = p("md"); x.write_text(
+                core.markdown_bloques(archivo, modelo, idioma, bloques, metricas), encoding="utf-8"
+            )
+            escritos.append(x.name); paths["md"] = str(x)
+        if formatos.get("srt"):
+            x = p("srt"); x.write_text(core.srt_segmentos(segs), encoding="utf-8")
+            escritos.append(x.name); paths["srt"] = str(x)
+        if formatos.get("vtt"):
+            x = p("vtt"); x.write_text(core.vtt_segmentos(segs), encoding="utf-8")
+            escritos.append(x.name); paths["vtt"] = str(x)
+        if formatos.get("json"):
+            x = p("json"); escritos.append(x.name); paths["json"] = str(x)
+        if formatos.get("docx"):
+            x = p("docx"); escritos.append(x.name); paths["docx"] = str(x)
+        return escritos, paths
 
     def _reescribir_reportes(
         self, paths, archivo, modelo, idioma, texto, segs, bloques,
@@ -119,3 +203,14 @@ class PipelineV52Mixin(v51.PipelineV51Mixin):
                 Path(paths["docx"]), archivo, modelo, idioma,
                 bloques, metricas, perfil,
             )
+
+    def _reescribir_json_final(
+        self, paths, archivo, modelo, idioma, texto, segs, bloques,
+        speakers, metricas, perfil, glosario,
+    ):
+        if paths.get("json"):
+            doc = reporting52.documento_json_detallado(
+                archivo, modelo, idioma, texto, segs, bloques,
+                speakers, metricas, perfil, glosario,
+            )
+            Path(paths["json"]).write_text(core.json_texto(doc), encoding="utf-8")
