@@ -77,10 +77,18 @@ def infer_global_profile(
 ) -> str:
     """Reconoce un preset solo si todos los controles conocidos coinciden.
 
-    Es deliberadamente conservador para migrar configuraciones V5.1 o
-    anteriores. Si el usuario tenía una combinación propia queda en
-    ``Personalizado`` en vez de ser sobrescrita silenciosamente.
+    Las llamadas antiguas de tres argumentos se conservan para herramientas y
+    pruebas V5.1: pueden reconocer el antiguo ``medium/Preciso/Precisa`` como
+    Preciso. La UI V5.2 pasa además ``diarize`` y ``speaker_mode``; allí esa
+    combinación histórica queda ``Personalizado`` y no se transforma en el
+    nuevo Preciso (Equilibrada 0.20) de forma silenciosa.
     """
+    if diarize is None and speaker_mode is None:
+        if (str(model), str(asr_profile), str(diar_profile)) == (
+            "medium", "Preciso", "Precisa"
+        ):
+            return "Preciso"
+
     for name, cfg in GLOBAL_PROFILES.items():
         if name == "Personalizado":
             continue
