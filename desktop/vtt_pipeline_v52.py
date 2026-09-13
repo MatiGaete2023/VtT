@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, List, Mapping
+from typing import Any, Dict, List, Mapping, Sequence
 
 import transcriptor_whisper as base
 import vtt_core as core
@@ -14,6 +14,56 @@ import vtt_pipeline_v51 as v51
 import vtt_reporting as reporting_base
 import vtt_reporting_v52 as reporting52
 import vtt_validation_v52 as validation52
+
+
+def speaker_count_snapshot(
+    meta: Mapping[str, Any], speakers: Sequence[Mapping[str, Any]]
+) -> Dict[str, Any]:
+    """Separa explícitamente conteos acústicos, identidad y texto.
+
+    El conjunto de identidades auditadas es autoritativo cuando existe. Esto
+    evita volver a confundir el número de etiquetas que recibieron palabras
+    con el número de identidades acústicas que sobrevivieron al refinamiento.
+    """
+    consistency = dict(meta.get("identity_consistency") or {})
+    raw = int(
+        meta.get("raw_sherpa_selected_speakers")
+        or meta.get("detected_speakers_before_identity")
+        or meta.get("detected_speakers_engine")
+        or meta.get("detected_speakers")
+        or 0
+    )
+    engine_identity_n = int(
+        meta.get("detected_speakers_engine")
+        or meta.get("detected_speakers")
+        or raw
+        or 0
+    )
+    assigned_raw = {
+        int(s.get("raw_numeric_id")) for s in (speakers or [])
+        if s.get("raw_numeric_id") is not None
+    }
+    all_identity_raw = {
+        int(s.get("speaker")) for s in (consistency.get("speakers") or [])
+        if s.get("speaker") is not None
+    }
+    identity_n = len(all_identity_raw) if all_identity_raw else engine_identity_n
+    text_n = len(speakers or [])
+    unassigned = sorted(all_identity_raw - assigned_raw)
+    assigned_without_identity = sorted(assigned_raw - all_identity_raw) if all_identity_raw else []
+    return {
+        "raw_acoustic_clusters": raw,
+        "engine_identity_clusters": engine_identity_n,
+        "identity_consistency_clusters": len(all_identity_raw),
+        "identity_clusters_after_refinement": identity_n,
+        "text_assigned_speakers": text_n,
+        "unassigned_acoustic_clusters": len(unassigned),
+        "unassigned_raw_ids": unassigned,
+        "text_ids_missing_from_identity_audit": assigned_without_identity,
+        "identity_count_mismatch": bool(
+            all_identity_raw and engine_identity_n != len(all_identity_raw)
+        ),
+    }
 
 
 class PipelineV52Mixin(v51.PipelineV51Mixin):
@@ -49,47 +99,13 @@ class PipelineV52Mixin(v51.PipelineV51Mixin):
             archivo, segs, dur, opts, log
         )
         meta = dict(meta or {})
-        consistency = dict(meta.get("identity_consistency") or {})
-
-        raw = int(
-            meta.get("raw_sherpa_selected_speakers")
-            or meta.get("detected_speakers_before_identity")
-            or meta.get("detected_speakers_engine")
-            or meta.get("detected_speakers")
-            or 0
-        )
-        engine_identity_n = int(
-            meta.get("detected_speakers_engine")
-            or meta.get("detected_speakers")
-            or raw
-            or 0
-        )
-        text_n = len(speakers or [])
-        assigned_raw = {
-            int(s.get("raw_numeric_id")) for s in (speakers or [])
-            if s.get("raw_numeric_id") is not None
-        }
-        all_identity_raw = {
-            int(s.get("speaker")) for s in (consistency.get("speakers") or [])
-            if s.get("speaker") is not None
-        }
-        identity_n = len(all_identity_raw) if all_identity_raw else engine_identity_n
-        unassigned = sorted(all_identity_raw - assigned_raw)
-        assigned_without_identity = sorted(assigned_raw - all_identity_raw) if all_identity_raw else []
-        counts = {
-            "raw_acoustic_clusters": raw,
-            "engine_identity_clusters": engine_identity_n,
-            "identity_consistency_clusters": len(all_identity_raw),
-            "identity_clusters_after_refinement": identity_n,
-            "text_assigned_speakers": text_n,
-            "unassigned_acoustic_clusters": len(unassigned),
-            "unassigned_raw_ids": unassigned,
-            "text_ids_missing_from_identity_audit": assigned_without_identity,
-            "identity_count_mismatch": bool(
-                all_identity_raw and engine_identity_n != len(all_identity_raw)
-            ),
-        }
+        counts = speaker_count_snapshot(meta, speakers)
         meta["speaker_counts"] = counts
+
+        raw = int(counts["raw_acoustic_clusters"])
+        identity_n = int(counts["identity_clusters_after_refinement"])
+        text_n = int(counts["text_assigned_speakers"])
+        unassigned = list(counts["unassigned_raw_ids"])
 
         modo = str(opts.get("num_speakers", "Auto"))
         requested = None if modo == "Auto" else int(modo)
