@@ -1,13 +1,8 @@
 name: Desktop executables
 
-# TEMPORAL V5.2.1: push de esta rama solo para validar el empaquetado final.
+# Opcional: genera ejecutables independientes (no necesitan instalar Python).
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - "claude/voice-transcriber-multiplatform-6xifq1"
-    paths:
-      - ".github/workflows/desktop-build.yml"
 
 jobs:
   build:
