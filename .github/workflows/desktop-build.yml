@@ -1,5 +1,6 @@
 name: Windows Ultra executable
 
+# Trigger temporal solo para empaquetar el código Ultra ya validado en Windows.
 on:
   push:
     branches:
