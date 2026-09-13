@@ -1,6 +1,12 @@
 name: Windows Ultra executable
 
+# Trigger temporal para validar el ejecutable tras incorporar Ultra Calidad 90s.
 on:
+  push:
+    branches:
+      - "windows-ultra-fast"
+    paths:
+      - ".github/workflows/desktop-build.yml"
   workflow_dispatch:
 
 jobs:
