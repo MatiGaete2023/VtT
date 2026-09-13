@@ -1,6 +1,6 @@
-# VtT — versión de escritorio V5.2-performance
+# VtT — versión de escritorio V5.2.1
 
-**Estado de esta guía:** 9 de septiembre de 2026.
+**Estado de esta guía:** 13 de septiembre de 2026.
 
 VtT transcribe audio y video localmente en Windows, macOS y Linux. Whisper, diarización y verificación acústica de identidad se ejecutan en el equipo.
 
@@ -18,18 +18,20 @@ Alternativas: `python run.py`, `py run.py` o, en macOS/Linux, `./run.sh`/`python
 
 `run.py` crea `desktop/.venv`, instala `requirements.txt` y guarda su SHA-256 en `.venv/.deps_ok`. `--update` o `--repair` fuerza reparación. El entrypoint final es `vtt_main.py`.
 
-## 2. Modos globales V5.2
+## 2. Modos globales V5.2.1
 
-V5.2 añade un selector de alto nivel que coordina modelo ASR, perfil ASR y perfil de diarización:
+Los presets son configuraciones completas: coordinan modelo ASR, perfil ASR, activación de hablantes, conteo Auto y perfil de diarización.
 
-| Modo | Modelo | Perfil ASR | Diarización | Uso |
-|---|---|---|---|---|
-| Rápido | small | Rápido | Rápida | prioriza velocidad CPU |
-| Equilibrado | small | Equilibrado | Equilibrada | recomendado para uso habitual |
-| Preciso | medium | Preciso | Precisa | mayor costo para casos donde se justifica |
-| Personalizado | no impone | no impone | no impone | conserva controles individuales |
+| Modo | Modelo | Perfil ASR | Hablantes | Diarización | Objetivo |
+|---|---|---|---|---|---|
+| Rápido | small | Rápido | Auto | Rápida 0.25 | prioriza velocidad CPU |
+| Equilibrado | small | Equilibrado | Auto | Equilibrada 0.20 | recomendado; intenta quedar cerca/bajo tiempo real |
+| Preciso | medium | Preciso | Auto | Equilibrada 0.20 | más precisión ASR y mayor presupuesto |
+| Personalizado | libre | libre | libre | libre, incluida Precisa 0.10 | control manual |
 
-La migración desde V5.1 es conservadora: si una configuración anterior no coincide exactamente con un preset V5.2, se abre como **Personalizado** y no se sobreescribe silenciosamente.
+**Precisa 0.10 ya no forma parte de un preset global.** Sigue disponible en Personalizado/avanzado. La prueba institucional mostró que su costo de embeddings sherpa era demasiado alto para uso habitual en CPU.
+
+La migración desde V5.1 es conservadora: las firmas antiguas se reconocen como legado, pero una combinación que no coincide con un preset V5.2.1 completo queda en **Personalizado** y no se modifica silenciosamente.
 
 ## 3. Perfiles ASR
 
@@ -39,7 +41,7 @@ La migración desde V5.1 es conservadora: si una configuración anterior no coin
 
 CPU `int8` es la ruta segura. CUDA automática solo se usa si CTranslate2 la detecta utilizable. Cuando la diarización está activa, VtT solicita timestamps por palabra internamente porque son necesarios para la alineación palabra↔hablante.
 
-Se incluye `benchmark_asr.py` para comparar, sobre un mismo archivo, `medium/Preciso`, `medium/Equilibrado`, `small/Preciso` y `small/Equilibrado`. La similitud textual contra `medium/Preciso` es solo un indicador comparativo: no reemplaza ground truth lingüístico.
+`benchmark_asr.py` compara, sobre un mismo archivo, `medium/Preciso`, `medium/Equilibrado`, `small/Preciso` y `small/Equilibrado`. La similitud textual contra `medium/Preciso` es un indicador comparativo, no ground truth lingüístico.
 
 ## 4. Diarización
 
@@ -47,7 +49,7 @@ Perfiles:
 
 - **Rápida:** `window_shift_ratio=0.25`.
 - **Equilibrada:** `0.20`, recomendada.
-- **Precisa:** `0.10`, alto costo CPU.
+- **Precisa:** `0.10`, alto costo CPU y solo avanzada/personalizada.
 
 Número de hablantes: Auto o manual 2–8.
 
@@ -58,7 +60,7 @@ VtT descarga desde releases oficiales de k2-fsa:
 - archive pyannote segmentation 3.0: 6.958.444 bytes;
 - embedding 3D-Speaker: 39.593.761 bytes.
 
-Los assets históricos no entregan `digest` en la API de GitHub. Para no depender del TOFU anterior, VtT fija los SHA-256 reproducidos en dos descargas independientes de los assets oficiales el 9 de septiembre de 2026:
+SHA-256 auditados por VtT:
 
 ```text
 archive segmentación:
@@ -71,129 +73,157 @@ embedding 3D-Speaker:
 1a331345f04805badbb495c775a6ddffcdd1a732567d5ec8b3d5749e3c7a5e4b
 ```
 
-La descarga se promueve a modelo válido solo si tamaño y hash coinciden. El ONNX extraído se valida por separado. Estos son **pins auditados por VtT**, no una firma publicada por upstream.
+La descarga se promueve a modelo válido solo si tamaño y hash coinciden. El ONNX extraído se valida por separado. Son pins auditados por VtT, no una firma upstream.
 
-## 5. Auto V5.2-performance
-
-Auto mantiene el análisis estructural V4/V5, pero V5.2 agrega una ruta de bajo costo antes de repetir sherpa completo.
+## 5. Auto V5.2.1 y presupuesto temporal
 
 Flujo:
 
-1. primera pasada con umbral balanceado;
-2. análisis de cantidad, dominancia, duración de turnos, microclusters y frecuencia de cambios;
-3. si existe sobredetección/fragmentación, precheck acústico acotado con embeddings;
-4. si el precheck consolida la solución de forma segura, se evita la segunda pasada completa;
-5. si no es concluyente, se ejecuta el reintento sherpa;
-6. cuando ambos candidatos siguen ambiguos, se combina penalización estructural con consistencia de identidad para elegir;
-7. una verificación final registra trazabilidad y confianza.
+1. primera pasada sherpa;
+2. análisis estructural;
+3. si hay sobredetección/fragmentación, precheck acústico de bajo costo;
+4. si el precheck resuelve el caso, se evita el reintento;
+5. si no lo resuelve, V5.2.1 compara el tiempo ya consumido, el costo real de la primera pasada y el presupuesto del preset;
+6. si una segunda pasada proyectada excedería el presupuesto, se conserva la primera solución y el resultado queda marcado como **ambiguo por presupuesto**;
+7. si hay presupuesto, se permite el reintento y, cuando corresponde, selección identity-aware;
+8. control final de identidad y trazabilidad.
 
-El precheck está deliberadamente presupuestado: máximo 18 embeddings y hasta 3 por identidad. No sustituye sherpa por un clasificador biométrico.
+El precheck mantiene máximo 18 embeddings y hasta 3 por identidad. El presupuesto temporal no interrumpe la primera pasada; evita repetir todo sherpa cuando el tiempo restante ya no alcanza.
 
-## 6. Identidad V5.2
+Objetivos actuales de `processing_seconds`:
 
-V5.2 conserva los principios V5.1 y corrige puntos ciegos:
+- Rápido: ~0.85× la duración del audio;
+- Equilibrado: ~1.00×;
+- Preciso: ~1.50×;
+- Personalizado: sin límite automático.
 
-- turnos largos no forman prototipos por defecto;
+Estos objetivos son políticas, no garantías de hardware.
+
+## 6. Cancelación y recuperación
+
+V5.2.1 usa una única excepción `DiarizacionCancelada` para los servicios V5/V5.1/V5.2. El pipeline la traduce siempre a la cancelación normal de la aplicación.
+
+Al terminar ASR y antes de iniciar diarización, VtT escribe de forma atómica:
+
+`<nombre>_ASR_RECUPERABLE.json`
+
+Contiene texto y segmentos ya reconocidos. Se elimina después de un trabajo correcto y se conserva si la diarización falla o se cancela. Así un fallo posterior no obliga a perder el reconocimiento ya terminado.
+
+La salida parcial tradicional también se mantiene cuando es posible.
+
+## 7. Identidad V5.2
+
+- turnos largos no forman prototipos completos por defecto;
 - una voz breve no se elimina solo por duración;
-- una identidad con dos apariciones se evalúa por similitud entre ambas **y** por cuánto mejor la explica una identidad rival;
-- una muestra única se informa como insuficiente, sin presentar la similitud trivial del vector consigo mismo como evidencia;
-- un turno largo recibe primero una sonda de tres ventanas; solo si resulta heterogéneo pasa al escaneo detallado;
-- embeddings y PCM se reutilizan dentro del job para reducir costo;
-- en modo manual se respeta el número fijado por el usuario.
+- dos apariciones se evalúan por similitud directa y rival;
+- una muestra única se informa como insuficiente;
+- turnos largos usan primero una sonda de tres ventanas;
+- embeddings y PCM se reutilizan dentro del job;
+- modo manual conserva el conteo solicitado.
 
-Las etiquetas alta/media/baja/insuficiente miden consistencia interna de la agrupación. No identifican personas reales.
+Las etiquetas alta/media/baja/insuficiente miden consistencia interna de agrupación. No identifican personas reales.
 
-## 7. Conteos y alineación
+## 8. Conteos y alineación
 
-V5.2 separa tres magnitudes que antes podían confundirse:
+V5.2.1 conserva magnitudes independientes:
 
-- **clusters sherpa seleccionados**;
-- **clusters tras control de identidad**;
-- **hablantes con texto asignado**.
+- `raw_acoustic_clusters`: candidato sherpa seleccionado;
+- `engine_identity_clusters`: resumen de identidad entregado por el motor;
+- `identity_consistency_clusters`: conjunto explícito de IDs presentes en la auditoría de identidad;
+- `identity_clusters_after_refinement`: conteo autoritativo usado en el reporte cuando existe el conjunto anterior;
+- `text_assigned_speakers`: identidades que recibieron palabras;
+- `unassigned_raw_ids`: identidades acústicas sin texto;
+- `identity_count_mismatch`: diagnóstico cuando un resumen numérico del motor no coincide con el conjunto explícito.
 
-Un cluster acústico sin palabras alineadas no desaparece de la trazabilidad: queda identificado como cluster sin texto en JSON/Word.
+Esto corrige la anomalía reproducida 8 / 9 / raw 5: el pipeline ya no reemplaza el conteo acústico por `len(speakers)`.
 
-Cada palabra se cruza con los turnos acústicos. Un segmento Whisper puede dividirse internamente si cambia la voz. Existe fallback por segmento cuando faltan palabras temporizadas.
+Cada palabra se cruza con turnos acústicos y un segmento Whisper puede dividirse internamente al cambiar la voz. Existe fallback por segmento cuando faltan palabras temporizadas.
 
-## 8. Worker, métricas y rendimiento
+## 9. Métricas finales
 
-El worker persistente permite reutilizar modelos y motor entre archivos compatibles. V5.2 además evita una segunda decodificación para identidad y comparte un caché de embeddings durante precheck, selección y validación final.
+Se distinguen:
 
-La ruta final usa `vtt_diarization_v52_metrics.py` sobre el motor V5.2. Esta capa no modifica el resultado acústico: corrige la contabilidad temporal para que todas las evaluaciones `_light_identity` realizadas durante precheck/selección se incorporen al tiempo de identidad.
+- `model_load_seconds`;
+- `asr_seconds`;
+- `diarization_seconds`;
+- `export_seconds`;
+- `overhead_seconds`;
+- `report_generation_seconds`;
+- `processing_seconds = ASR + diarización + exportación + overhead`;
+- `end_to_end_seconds = carga modelo + procesamiento + generación de informes`.
 
-JSON/DOCX registra, según disponibilidad:
+El estado `performance` se recalcula desde estos valores finales. No se conserva un `within_realtime` calculado antes de exportar.
 
-- carga del modelo Whisper;
-- ASR;
-- diarización total;
-- preparación/reutilización del motor;
-- wall por cada pasada sherpa;
-- timers internos sherpa cuando el backend los expone/captura;
-- precheck y si evitó el reintento;
-- embeddings de identidad y uso de caché;
-- `final_stage_wall_seconds`: wall de la verificación final;
-- `light_identity_wall_seconds`: suma de evaluaciones ligeras del job;
-- `total_wall_seconds`: suma anterior completa;
-- `identity_wall_seconds`: alias del total acumulado para compatibilidad;
-- conteos por etapa;
-- presupuesto `processing_seconds <= audio_seconds`.
+La contabilidad de identidad mantiene `final_stage_wall_seconds`, `light_identity_wall_seconds`, `total_wall_seconds` e `identity_wall_seconds`.
 
-El Word V5.2 muestra **Control identidad V5.2**, `Identidad total (wall)`, `Identidad etapa final (wall)` e `Identidad ligera (wall)`. Los documentos creados por versiones anteriores pueden conservar etiquetas históricas; VtT no reescribe transcripciones antiguas automáticamente.
-
-El objetivo de tiempo real es un indicador por equipo, no una garantía universal.
-
-## 9. Exportaciones
+## 10. Exportaciones
 
 - `.txt`: bloques legibles.
 - `.md`: bloques/metadata.
 - `.docx`: Word estructurado y diagnóstico.
-- `.json`: fuente maestra **schema v7**.
+- `.json`: fuente maestra **schema v8**.
 - `.srt` / `.vtt`: segmentos técnicos.
 
-Las exportaciones no sobreescriben silenciosamente una familia existente. El DOCX no corrige semánticamente el ASR: nombres propios, cifras y frases dudosas requieren revisión humana cuando la exactitud sea importante.
+El flujo V5.2.1 difiere JSON/DOCX hasta disponer de los tiempos funcionales finales. El Word se construye directamente en V5.2 y se guarda una sola vez; ya no se encadenan escritores V4→V5→V5.1→V5.2. Después solo se refresca el JSON final para persistir el tiempo de generación del informe y las métricas recalculadas.
 
-## 10. Grabación, formatos y YouTube
+Las salidas no sobreescriben silenciosamente familias existentes.
+
+## 11. Worker y rendimiento institucional
+
+El worker persistente reutiliza modelos/motor entre archivos compatibles. V5.2 evita segunda decodificación para identidad y comparte caché de embeddings.
+
+Campaña institucional relevante:
+
+- `medium + ASR Preciso + diarización Precisa 0.10`: diarización extremadamente lenta; embeddings sherpa dominaron el costo;
+- `small + ASR Equilibrado` con diarización accidentalmente desactivada: 404 s de audio en ~164 s de ASR. Esa prueba demostró velocidad ASR pero no fue una prueba válida del preset completo;
+- V5.2.1 corrige la causa: los presets globales ahora activan explícitamente `Hablantes: Auto`.
+
+La próxima campaña comparable debe usar **Equilibrado + Auto** y registrar presupuesto, primera pasada, decisión de retry, tiempo por hilos y conteos por etapa.
+
+## 12. Grabación, formatos y YouTube
 
 Audio: `.mp3 .wav .m4a .ogg .flac .aac .wma .opus .aif .aiff`.
 
 Video/contenedores: `.mp4 .webm .mkv .avi .mov .m4v .mpeg .mpg .3gp .ts .m2ts`.
 
-PyAV verifica que exista una pista de audio antes de iniciar un trabajo largo.
+PyAV verifica una pista de audio antes de un trabajo largo.
 
 - Micrófono: `sounddevice`.
 - Loopback Windows: `soundcard`/WASAPI.
-- Linux: monitores PulseAudio/PipeWire cuando existen.
-- macOS: loopback requiere un dispositivo virtual como BlackHole.
-- YouTube: descarga explícita mediante `yt-dlp`; FFmpeg es opcional para mejorar esa descarga.
+- Linux: PulseAudio/PipeWire cuando existe.
+- macOS: loopback requiere dispositivo virtual como BlackHole.
+- YouTube: descarga explícita mediante `yt-dlp`.
 
-## 11. Privacidad
+## 13. Privacidad
 
-ASR, diarización e identidad son locales. La red se usa para dependencias, primera descarga de modelos, descarga explícita de YouTube y CI/build. No hay telemetría ni analytics.
+ASR, diarización e identidad son locales. La red se usa para dependencias, primera descarga de modelos, YouTube explícito y CI/build. No hay telemetría ni analytics.
 
-## 12. Verificación automatizada
+## 14. Verificación automatizada
 
-`Desktop checks` ejecuta `py_compile` y `pytest` en Windows, macOS y Ubuntu. La suite incluye V5.2, migración de perfiles, identidad rival-aware, precheck Auto, conteos separados, reporting, contabilidad temporal e integridad de modelos.
+`Desktop checks` ejecuta `py_compile` y `pytest` en Windows, macOS y Ubuntu. V5.2.1 añade regresiones de:
 
-La campaña reproducible V5.2 con audios oficiales sherpa-onnx confirmó:
+- excepción de cancelación compartida;
+- traducción de cancelación en pipeline;
+- checkpoint ASR recuperable;
+- reproducción del conteo 8/10/9/raw5 sin colapsar magnitudes;
+- recálculo de performance final;
+- `processing_seconds` vs `end_to_end_seconds`;
+- un solo `Document.save()` por DOCX V5.2;
+- presets completos y migración legacy;
+- presupuesto temporal Auto.
 
-- 2 hablantes → 2;
-- 4 hablantes → 4;
-- una pasada en ambos ejemplos;
-- reutilización de modelos/motor/extractor en el segundo trabajo.
+La campaña acústica con audios oficiales sherpa sigue siendo smoke de conteo/reutilización, no DER/JER. `Desktop executables` construye PyInstaller para Windows, macOS y Ubuntu.
 
-El benchmark público `jfk.flac` confirmó que las cuatro combinaciones ASR se ejecutan; no constituye una evaluación de precisión para español ni del audio real del usuario.
-
-`Desktop executables` construye PyInstaller para Windows, macOS y Ubuntu. Las Actions se fijan por SHA. Los identificadores de las campañas de cierre se mantienen en `../AUDITORIA.md` para evitar que esta guía operativa quede obsoleta en cada build.
-
-## 13. Problemas frecuentes
+## 15. Problemas frecuentes
 
 - **Python no se reconoce:** instala Python 3.9+ para el usuario y prueba `py run.py`.
 - **Venv dañada:** `python run.py --repair`.
 - **Primera transcripción lenta:** puede estar descargando Whisper.
-- **Primera diarización lenta:** descarga/verifica los modelos y crea el motor.
-- **Precisa muy lenta:** usa Equilibrada.
-- **Auto muestra reservas/ambigüedad:** revisa las voces o fija N si lo conoces.
-- **Un archivo se rechaza:** no se encontró una pista de audio decodificable.
-- **Captura del sistema no aparece:** revisa el backend del SO; macOS requiere dispositivo virtual.
+- **Primera diarización lenta:** descarga/verifica modelos y crea motor.
+- **Precisa 0.10 muy lenta:** usa Equilibrada; 0.10 es avanzada.
+- **Auto omitió segunda pasada:** revisa el campo de presupuesto; el resultado debe aparecer como ambiguo si la omisión fue temporal.
+- **ASR_RECUPERABLE permanece:** una etapa posterior no terminó correctamente; conserva trabajo útil.
+- **Auto muestra reservas/ambigüedad:** revisa voces o fija N si lo conoces.
+- **Un archivo se rechaza:** no existe pista de audio decodificable.
 
-Las pruebas de hardware y de calidad acústica permanecen en `../PRUEBAS_MANUALES.md`.
+Las pruebas de hardware y calidad acústica permanecen en `../PRUEBAS_MANUALES.md`.
