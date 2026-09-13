@@ -1,15 +1,16 @@
-name: Desktop checks
+name: Windows Ultra checks
 
 on:
   push:
     branches:
-      - "claude/voice-transcriber-multiplatform-6xifq1"
-      - "main"
+      - "windows-ultra-fast"
     paths:
       - "desktop/**"
       - "!desktop/**/*.md"
       - ".github/workflows/desktop-check.yml"
   pull_request:
+    branches:
+      - "windows-ultra-fast"
     paths:
       - "desktop/**"
       - "!desktop/**/*.md"
@@ -17,12 +18,8 @@ on:
 
 jobs:
   check:
-    name: py_compile + pytest en ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+    name: py_compile + pytest en Windows
+    runs-on: windows-latest
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -32,13 +29,7 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Instalar Tk (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y python3-tk
-
-      - name: Compilar (verificacion de sintaxis)
+      - name: Compilar (verificación de sintaxis)
         working-directory: desktop
         run: >-
           python -m py_compile
@@ -55,6 +46,7 @@ jobs:
           vtt_identity_v52.py vtt_diarization_v52.py vtt_diarization_v52_metrics.py
           vtt_diarization_service_v52.py vtt_validation_v52.py vtt_reporting_v52.py
           vtt_performance.py vtt_pipeline_v52.py vtt_ui_v52.py benchmark_asr.py
+          vtt_ultra_config.py vtt_pipeline_ultra.py vtt_ui_ultra.py
           vtt_main.py run.py
 
       - name: Instalar dependencias de pruebas
