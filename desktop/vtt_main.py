@@ -1,15 +1,21 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Entry point final de escritorio VtT V5.2-performance."""
+"""Entry point de VtT Ultra Windows."""
 import multiprocessing as mp
 import tkinter as tk
 
+from vtt_ultra_config import install_ultra_mode
+
+# Debe instalarse antes de importar UI/performance para que los Combobox vean
+# el preset y el perfil de diarización ultrarrápidos.
+install_ultra_mode()
+
 import vtt_app as ui
-from vtt_pipeline_v52 import PipelineV52Mixin
-from vtt_ui_v52 import DiarizacionV52UIMixin
+from vtt_pipeline_ultra import PipelineUltraMixin
+from vtt_ui_ultra import DiarizacionUltraUIMixin
 
 
-class VtTApp(DiarizacionV52UIMixin, PipelineV52Mixin, ui.VtTApp):
+class VtTApp(DiarizacionUltraUIMixin, PipelineUltraMixin, ui.VtTApp):
     pass
 
 
