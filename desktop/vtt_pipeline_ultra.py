@@ -164,7 +164,9 @@ class PipelineUltraMixin(v52.PipelineV52Mixin):
             "passes": 1,
             "retry": False,
             "retry_requested": False,
-            "retry_avoided": True,
+            # Ultra no ejecuta la lógica de retry; no se reporta falsamente
+            # como un retry "evitado" por precheck o presupuesto.
+            "retry_avoided": False,
             "retry_skipped_budget": False,
             "selection_reason": "ultra_una_pasada",
             "selected_threshold": None if ns >= 0 else threshold,
