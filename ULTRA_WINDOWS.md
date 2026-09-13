@@ -66,6 +66,41 @@ El preset Ultra usa un objetivo orientativo de `processing_seconds <= 0.60 * aud
 
 Para un audio de 6:44 (404 s), el objetivo nominal es aproximadamente 242 s de procesamiento. La rama no repite Sherpa para intentar alcanzar ese objetivo.
 
+## Verificación automatizada — 13/09/2026
+
+### Windows Ultra checks
+
+La ruta final de código quedó verificada en Windows con `py_compile` y la suite completa de pruebas. La campaña final incorporó las regresiones Ultra y comprobó, entre otros puntos:
+
+- preset `tiny + Rápido + Auto + Ultrarrápida`;
+- no forzar timestamps por palabra;
+- threshold Auto 0.82;
+- conservación de clusters acústicos sin texto;
+- una sola llamada Sherpa con `adaptive=False`;
+- sin retry solicitado/evitado;
+- sin refinamiento de identidad V5.2;
+- alineación por segmento;
+- salida Auto marcada como estimación Ultra ambigua.
+
+El worker persistente instala explícitamente el perfil `Ultrarrápida` dentro del proceso hijo `spawn`, evitando que Windows/PyInstaller caigan silenciosamente al perfil Equilibrado.
+
+### PyInstaller Windows
+
+`Windows Ultra executable #12`, run `34731116065`: **success**.
+
+Artefacto GitHub Actions:
+
+```text
+VtT-Ultra-Windows
+127.416.750 bytes
+sha256:38b2bc64572f2de1f476db085154ff73d77552e6c25403c121ccacbe0a769821
+expira: 12 de diciembre de 2026
+```
+
+El SHA anterior corresponde al ZIP/artefacto publicado por GitHub Actions, no a una firma Authenticode del `.exe` interior.
+
+El workflow de build quedó nuevamente en ejecución manual (`workflow_dispatch`), sin trigger temporal de push.
+
 ## Qué medir en la prueba real
 
 Registrar:
