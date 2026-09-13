@@ -18,7 +18,6 @@ class DiarizacionV52UIMixin(v51.DiarizacionV51UIMixin):
         self._global_applying = False
         super()._ui()
         fr = self.cmb_m.master
-        # Modo global antes de los controles individuales.
         for child in fr.grid_slaves():
             info = child.grid_info()
             try:
@@ -41,6 +40,8 @@ class DiarizacionV52UIMixin(v51.DiarizacionV51UIMixin):
         self.v_global_profile.trace_add("write", lambda *_: self._apply_global_profile())
         self.v_perfil.trace_add("write", lambda *_: self._component_changed())
         self.v_diar_perfil.trace_add("write", lambda *_: self._component_changed())
+        self.v_diarizar.trace_add("write", lambda *_: self._component_changed())
+        self.v_num_speakers.trace_add("write", lambda *_: self._component_changed())
         self.cmb_m.bind("<<ComboboxSelected>>", lambda _e: self._component_changed(), add="+")
         self._apply_global_profile()
 
@@ -71,6 +72,10 @@ class DiarizacionV52UIMixin(v51.DiarizacionV51UIMixin):
                 self.v_perfil.set(str(cfg["asr_profile"]))
             if cfg.get("diar_profile"):
                 self.v_diar_perfil.set(str(cfg["diar_profile"]))
+            if cfg.get("diarize") is not None:
+                self.v_diarizar.set(bool(cfg["diarize"]))
+            if cfg.get("speaker_mode"):
+                self.v_num_speakers.set(str(cfg["speaker_mode"]))
         finally:
             self._global_applying = False
         self._update_global_label()
@@ -83,26 +88,27 @@ class DiarizacionV52UIMixin(v51.DiarizacionV51UIMixin):
         if cfg["name"] == "Personalizado":
             text = "controles individuales"
         else:
+            diar = (
+                f"hablantes {cfg.get('speaker_mode')} · diar. {cfg['diar_profile']}"
+                if cfg.get("diarize") else "sin hablantes"
+            )
             text = (
-                f"{cfg['model']} · ASR {cfg['asr_profile']} · diar. {cfg['diar_profile']}"
+                f"{cfg['model']} · ASR {cfg['asr_profile']} · {diar}"
                 + (" · recomendado" if cfg["name"] == "Equilibrado" else "")
             )
         self.lbl_global_profile.configure(text=text)
 
     def _aplicar_config(self):
-        # Primero deja que las capas previas restauren exactamente los controles
-        # que el usuario ya tenía guardados.
         super()._aplicar_config()
 
         stored = self.cfg.get("global_profile")
         if stored in perf.GLOBAL_PROFILES:
             value = str(stored)
         else:
-            # Migración V5.1 -> V5.2: reconocer un preset solo cuando los tres
-            # controles restaurados coinciden. Cualquier combinación distinta
-            # queda en Personalizado y NO se modifica silenciosamente.
             value = perf.infer_global_profile(
-                self.cmb_m.get(), self.v_perfil.get(), self.v_diar_perfil.get()
+                self.cmb_m.get(), self.v_perfil.get(), self.v_diar_perfil.get(),
+                diarize=bool(self.v_diarizar.get()),
+                speaker_mode=self.v_num_speakers.get(),
             )
 
         self._global_applying = True
@@ -110,8 +116,6 @@ class DiarizacionV52UIMixin(v51.DiarizacionV51UIMixin):
             self.v_global_profile.set(value)
         finally:
             self._global_applying = False
-        # Si existe un preset explícito sí corresponde normalizar sus tres
-        # controles; Personalizado conserva lo que restauró super().
         self._apply_global_profile()
         self._global_profile_run = self.v_global_profile.get()
 
