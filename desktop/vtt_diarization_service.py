@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Worker persistente de diarización para reutilizar modelos entre archivos.
+"""Worker persistente de diarización para la rama Windows Ultra.
 
-En la rama Windows Ultra el proceso hijo se crea con ``spawn``. Por eso el
-perfil Ultrarrápida se instala también al importar este módulo en el worker y
-no se depende de mutaciones de memoria realizadas únicamente en el proceso UI.
+El proceso hijo se crea con ``spawn`` en Windows. Por eso los perfiles Ultra se
+instalan también dentro del worker. El mismo worker atiende Ultra Máxima y
+Ultra Calidad 90s; esta última puede solicitar una verificación de identidad
+ligera sin segunda pasada sherpa.
 """
 from __future__ import annotations
 
@@ -19,15 +20,13 @@ from vtt_ultra_config import install_ultra_mode
 # Idempotente y necesario en Windows/spawn y PyInstaller.
 install_ultra_mode()
 
-import vtt_diarization_v5 as diar5
+import vtt_diarization_ultra as diar_ultra
 from vtt_diarization_errors import DiarizacionCancelada
 
 
 def _worker_loop(carpeta_modelos: str, comandos, eventos) -> None:
-    # El hijo spawn importa de nuevo este módulo; reforzamos la instalación del
-    # perfil antes de construir el motor para que shift 0.35 sea efectivo.
     install_ultra_mode()
-    engine = diar5.DiarizationEngine(Path(carpeta_modelos))
+    engine = diar_ultra.DiarizationEngine(Path(carpeta_modelos))
     while True:
         cmd = comandos.get()
         if not isinstance(cmd, dict):
@@ -46,6 +45,8 @@ def _worker_loop(carpeta_modelos: str, comandos, eventos) -> None:
                 speech_regions=cmd.get("speech_regions"),
                 adaptive=bool(cmd.get("adaptive", False)),
                 diar_profile=str(cmd.get("diar_profile", "Equilibrada")),
+                identity_lite=bool(cmd.get("identity_lite", False)),
+                time_budget_seconds=cmd.get("time_budget_seconds"),
                 log=lambda texto: eventos.put((job_id, "log", str(texto))),
                 progreso=lambda pct: eventos.put((job_id, "progress", float(pct))),
             )
@@ -109,6 +110,7 @@ class PersistentDiarizationService:
         speech_regions: Optional[Sequence[Sequence[float]]] = None,
         adaptive: bool = False,
         diar_profile: str = "Equilibrada",
+        identity_lite: bool = False,
         log: Optional[Callable[[str], None]] = None,
         progreso: Optional[Callable[[float], None]] = None,
         cancelado: Optional[Callable[[], bool]] = None,
@@ -135,6 +137,7 @@ class PersistentDiarizationService:
             "speech_regions": regiones,
             "adaptive": bool(adaptive),
             "diar_profile": str(diar_profile),
+            "identity_lite": bool(identity_lite),
             "time_budget_seconds": time_budget_seconds,
         })
 
