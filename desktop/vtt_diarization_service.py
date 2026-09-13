@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Worker persistente de diarización para reutilizar modelos entre archivos."""
+"""Worker persistente de diarización para reutilizar modelos entre archivos.
+
+En la rama Windows Ultra el proceso hijo se crea con ``spawn``. Por eso el
+perfil Ultrarrápida se instala también al importar este módulo en el worker y
+no se depende de mutaciones de memoria realizadas únicamente en el proceso UI.
+"""
 from __future__ import annotations
 
 import multiprocessing as mp
@@ -9,11 +14,19 @@ import traceback
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
+from vtt_ultra_config import install_ultra_mode
+
+# Idempotente y necesario en Windows/spawn y PyInstaller.
+install_ultra_mode()
+
 import vtt_diarization_v5 as diar5
 from vtt_diarization_errors import DiarizacionCancelada
 
 
 def _worker_loop(carpeta_modelos: str, comandos, eventos) -> None:
+    # El hijo spawn importa de nuevo este módulo; reforzamos la instalación del
+    # perfil antes de construir el motor para que shift 0.35 sea efectivo.
+    install_ultra_mode()
     engine = diar5.DiarizationEngine(Path(carpeta_modelos))
     while True:
         cmd = comandos.get()
