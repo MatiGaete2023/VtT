@@ -106,7 +106,10 @@ class DiarizationEngine(v5.DiarizationEngine):
             time_budget_seconds=time_budget_seconds,
         )
         meta = dict(meta or {})
-        before = len({int(t.get("speaker", 0)) for t in turnos})
+        raw_ids = sorted({int(t.get("speaker", 0)) for t in turnos})
+        before = len(raw_ids)
+        meta["raw_sherpa_ids"] = raw_ids
+        meta["raw_sherpa_selected_speakers"] = before
         if not identity_lite or not turnos:
             meta["identity_verification"] = {
                 "enabled": False,
