@@ -107,8 +107,13 @@ def test_ultra_pipeline_calls_sherpa_once_without_adaptive_retry():
     assert app.service.kwargs["diar_profile"] == ULTRA_DIAR_PROFILE
     assert meta["passes"] == 1
     assert meta["retry"] is False
+    assert meta["retry_requested"] is False
+    assert meta["retry_avoided"] is False
+    assert meta["selection_reason"] == "ultra_una_pasada"
     assert meta["identity_verification"]["enabled"] is False
     assert meta["alignment"]["mode"] == "segment_overlap"
     assert meta["word_timestamps_forced_for_diarization"] is False
+    assert meta["speaker_count_validation"]["status"] == "estimacion_ultra_una_pasada"
+    assert meta["speaker_count_validation"]["ambiguous"] is True
     assert len(out) == 2
     assert len(speakers) == 2
