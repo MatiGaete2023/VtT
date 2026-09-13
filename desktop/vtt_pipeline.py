@@ -93,6 +93,7 @@ class PipelineV3Mixin:
             "asr_seconds": max(0.0, float(asr_seconds or 0.0)),
             "diarization_seconds": max(0.0, float(diar_seconds or 0.0)),
             "export_seconds": 0.0,
+            "report_generation_seconds": 0.0,
             "overhead_seconds": max(0.0, float(overhead_seconds or 0.0)),
             "device": device,
             "compute_type": compute,
@@ -112,6 +113,46 @@ class PipelineV3Mixin:
             "auto_initial_speakers": diar_meta.get("initial_speakers"),
         }
         return reporting.cerrar_metricas(m)
+
+    def _prepare_diarization_opts(self, dur: float, asr_seconds: float, opts):
+        """Hook para que capas posteriores impongan presupuesto Auto."""
+        return dict(opts)
+
+    def _recalcular_metricas_finales(self, metricas: Mapping[str, Any]):
+        """Hook final; V5.2 recalcula además estado de rendimiento."""
+        return reporting.cerrar_metricas(metricas)
+
+    def _checkpoint_asr_path(self, out: Path, archivo: str) -> Path:
+        return out / f"{Path(archivo).stem}_ASR_RECUPERABLE.json"
+
+    def _guardar_checkpoint_asr(
+        self, out: Path, archivo: str, modelo: str, idioma: str,
+        texto: str, segs, asr_seconds: float,
+    ) -> Path:
+        """Guarda ASR antes de una etapa de diarización potencialmente costosa."""
+        out.mkdir(parents=True, exist_ok=True)
+        path = self._checkpoint_asr_path(out, archivo)
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        payload = {
+            "schema": "vtt_asr_checkpoint_v1",
+            "source": str(archivo),
+            "model": str(modelo),
+            "language": idioma or "auto",
+            "text": texto,
+            "segments": list(segs or []),
+            "asr_seconds": max(0.0, float(asr_seconds or 0.0)),
+        }
+        tmp.write_text(core.json_texto(payload), encoding="utf-8")
+        tmp.replace(path)
+        return path
+
+    @staticmethod
+    def _quitar_checkpoint_asr(path):
+        if path:
+            try:
+                Path(path).unlink(missing_ok=True)
+            except Exception:
+                pass
 
     def _escribir_vtt_detallado(self, out, archivo, modelo, idioma, texto, segs,
                                  bloques, speakers, metricas, formatos, perfil, glosario):
@@ -164,6 +205,15 @@ class PipelineV3Mixin:
                 Path(paths["docx"]), archivo, modelo, idioma, bloques, metricas, perfil
             )
 
+    def _reescribir_json_final(self, paths, archivo, modelo, idioma, texto, segs,
+                               bloques, speakers, metricas, perfil, glosario):
+        """Persistencia final de métricas sin volver a guardar Word."""
+        if paths.get("json"):
+            doc = reporting.documento_json_detallado(
+                archivo, modelo, idioma, texto, segs, bloques, speakers, metricas, perfil, glosario
+            )
+            Path(paths["json"]).write_text(core.json_texto(doc), encoding="utf-8")
+
     def _worker_vtt(self, archivos, modelo, idioma, salida, formatos, vad, words, opts):
         try:
             from faster_whisper import BatchedInferencePipeline, WhisperModel
@@ -199,6 +249,8 @@ class PipelineV3Mixin:
                 t_archivo = time.perf_counter()
                 seg_objs = []
                 partes = []
+                checkpoint_path = None
+                asr_seconds = 0.0
                 self.cola.put(("status", f"Transcribiendo {i}/{len(archivos)}: {nombre}"))
                 self.cola.put(("progress", 0))
 
@@ -241,20 +293,34 @@ class PipelineV3Mixin:
                         }
                     }
                     diar_seconds = 0.0
+                    out = Path(salida) if salida else (
+                        base.CARPETA_TRANSCRIPCIONES if self._es_temporal(archivo)
+                        else Path(archivo).parent
+                    )
 
                     if opts.get("diarizar") and segs:
+                        try:
+                            checkpoint_path = self._guardar_checkpoint_asr(
+                                out, archivo, modelo, idioma, texto, segs, asr_seconds
+                            )
+                            self.cola.put(("log", f"ASR recuperable guardado antes de diarización: {checkpoint_path.name}"))
+                        except Exception:
+                            self.cola.put(("log", "Aviso: no se pudo crear checkpoint ASR recuperable."))
+                        diar_opts = self._prepare_diarization_opts(dur, asr_seconds, opts)
                         self.cola.put(("status", f"Identificando hablantes: {nombre}"))
                         t_diar = time.perf_counter()
                         segs, speakers, diar_meta = self._diarizar_pipeline(
-                            archivo, segs, dur, opts,
+                            archivo, segs, dur, diar_opts,
                             lambda x: self.cola.put(("log", str(x))),
                         )
                         diar_seconds = time.perf_counter() - t_diar
                         self.cola.put((
                             "log",
                             "Identificación de hablantes completada: "
-                            f"~{base.ts_simple(diar_seconds)} · {len(speakers)} detectado(s)."
+                            f"~{base.ts_simple(diar_seconds)} · {len(speakers)} con texto."
                         ))
+                    else:
+                        diar_opts = dict(opts)
 
                     bloques = core.agrupar_segmentos(
                         segs,
@@ -267,15 +333,11 @@ class PipelineV3Mixin:
                         pre_export - t_archivo - asr_seconds - diar_seconds,
                     )
                     metricas = self._metricas_base(
-                        dur, perfil, perfil_nombre, device, compute, opts,
+                        dur, perfil, perfil_nombre, device, compute, diar_opts,
                         model_load_seconds if i == 1 else 0.0,
                         asr_seconds, diar_seconds, speakers, diar_meta, overhead,
                     )
 
-                    out = Path(salida) if salida else (
-                        base.CARPETA_TRANSCRIPCIONES if self._es_temporal(archivo)
-                        else Path(archivo).parent
-                    )
                     t_export = time.perf_counter()
                     escritos, paths = self._escribir_vtt_detallado(
                         out, archivo, modelo, idioma, texto, segs, bloques,
@@ -283,20 +345,25 @@ class PipelineV3Mixin:
                         opts.get("glosario", ""),
                     )
                     metricas["export_seconds"] = time.perf_counter() - t_export
-                    metricas = reporting.cerrar_metricas(metricas)
+                    metricas = self._recalcular_metricas_finales(metricas)
 
+                    # Un solo guardado final de Word en V5.2. La generación de
+                    # reportes se contabiliza aparte; luego solo se refresca JSON
+                    # para persistir sus métricas finales.
                     t_reporte = time.perf_counter()
                     self._reescribir_reportes(
                         paths, archivo, modelo, idioma, texto, segs, bloques,
                         speakers, metricas, perfil_nombre, opts.get("glosario", ""),
                     )
-                    metricas["export_seconds"] += time.perf_counter() - t_reporte
-                    metricas = reporting.cerrar_metricas(metricas)
-                    self._reescribir_reportes(
+                    metricas["report_generation_seconds"] = time.perf_counter() - t_reporte
+                    metricas = self._recalcular_metricas_finales(metricas)
+                    self._reescribir_json_final(
                         paths, archivo, modelo, idioma, texto, segs, bloques,
                         speakers, metricas, perfil_nombre, opts.get("glosario", ""),
                     )
 
+                    self._quitar_checkpoint_asr(checkpoint_path)
+                    checkpoint_path = None
                     self.ultima_salida = str(out)
                     self.cola.put(("salida_nueva", str(out)))
                     self.cola.put(("progress", 100))
@@ -307,6 +374,7 @@ class PipelineV3Mixin:
                         f"ASR {base.ts_simple(asr_seconds)} · "
                         f"diarización {base.ts_simple(diar_seconds)} · "
                         f"exportación {base.ts_simple(metricas.get('export_seconds', 0.0))} · "
+                        f"informes {base.ts_simple(metricas.get('report_generation_seconds', 0.0))} · "
                         f"{velocidad:.2f}× tiempo real",
                     ))
                     for e in escritos:
@@ -327,6 +395,8 @@ class PipelineV3Mixin:
                     correctos += 1
 
                 except base.Cancelado:
+                    if checkpoint_path:
+                        self.cola.put(("log", f"ASR recuperable conservado: {checkpoint_path}"))
                     if seg_objs:
                         try:
                             segs = core.segmentos_a_dicts(seg_objs)
@@ -338,9 +408,10 @@ class PipelineV3Mixin:
                             )
                             metricas = reporting.cerrar_metricas({
                                 "audio_seconds": self.dur_actual,
-                                "asr_seconds": max(0.0, time.perf_counter() - t_archivo),
+                                "asr_seconds": asr_seconds or max(0.0, time.perf_counter() - t_archivo),
                                 "diarization_seconds": 0.0,
                                 "export_seconds": 0.0,
+                                "report_generation_seconds": 0.0,
                                 "overhead_seconds": 0.0,
                                 "device": device,
                                 "compute_type": compute,
@@ -353,10 +424,14 @@ class PipelineV3Mixin:
                             parcial = str(Path(archivo).with_name(
                                 Path(archivo).stem + "_PARCIAL" + Path(archivo).suffix
                             ))
-                            escritos, _ = self._escribir_vtt_detallado(
+                            escritos, paths = self._escribir_vtt_detallado(
                                 out, parcial, modelo, idioma, texto, segs, bloques,
                                 [], metricas, formatos, perfil_nombre,
                                 opts.get("glosario", ""),
+                            )
+                            self._reescribir_reportes(
+                                paths, parcial, modelo, idioma, texto, segs, bloques,
+                                [], metricas, perfil_nombre, opts.get("glosario", ""),
                             )
                             self.cola.put(("log", f"PARCIAL {nombre}: " + ", ".join(escritos)))
                         except Exception:
@@ -365,6 +440,8 @@ class PipelineV3Mixin:
                             ))
                     raise
                 except Exception:
+                    if checkpoint_path:
+                        self.cola.put(("log", f"ASR recuperable conservado tras fallo: {checkpoint_path}"))
                     self.cola.put(("log", f"ERROR {nombre}:\n{traceback.format_exc()}"))
                     self.cola.put(("archivo_fallido", nombre))
                     fallidos += 1
