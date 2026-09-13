@@ -52,6 +52,12 @@ GLOBAL_PROFILES: Dict[str, Dict[str, Any]] = {
     },
 }
 
+LEGACY_V51_PROFILES = {
+    ("small", "Rapido", "Rápida"): "Rápido",
+    ("small", "Equilibrado", "Equilibrada"): "Equilibrado",
+    ("medium", "Preciso", "Precisa"): "Preciso",
+}
+
 ASR_BENCHMARK_MATRIX = (
     ("medium", "Preciso"),
     ("medium", "Equilibrado"),
@@ -75,19 +81,17 @@ def infer_global_profile(
     diarize: Optional[bool] = None,
     speaker_mode: Optional[str] = None,
 ) -> str:
-    """Reconoce un preset solo si todos los controles conocidos coinciden.
+    """Reconoce presets legacy o V5.2 sin migraciones silenciosas.
 
-    Las llamadas antiguas de tres argumentos se conservan para herramientas y
-    pruebas V5.1: pueden reconocer el antiguo ``medium/Preciso/Precisa`` como
-    Preciso. La UI V5.2 pasa además ``diarize`` y ``speaker_mode``; allí esa
-    combinación histórica queda ``Personalizado`` y no se transforma en el
-    nuevo Preciso (Equilibrada 0.20) de forma silenciosa.
+    Con tres argumentos se interpreta una configuración V5.1 histórica y se
+    aplican exactamente sus firmas antiguas. La UI V5.2 pasa además
+    ``diarize`` y ``speaker_mode``; en ese caso compara el preset completo
+    vigente, incluido Preciso con diarización Equilibrada 0.20.
     """
     if diarize is None and speaker_mode is None:
-        if (str(model), str(asr_profile), str(diar_profile)) == (
-            "medium", "Preciso", "Precisa"
-        ):
-            return "Preciso"
+        return LEGACY_V51_PROFILES.get(
+            (str(model), str(asr_profile), str(diar_profile)), "Personalizado"
+        )
 
     for name, cfg in GLOBAL_PROFILES.items():
         if name == "Personalizado":
