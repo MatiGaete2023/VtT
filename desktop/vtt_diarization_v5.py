@@ -200,8 +200,11 @@ class DiarizationEngine:
                 progreso: Optional[Callable[[float], None]] = None,
                 speech_regions: Optional[Sequence[Sequence[float]]] = None,
                 adaptive: bool = False,
-                diar_profile: str = "Equilibrada") -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+                diar_profile: str = "Equilibrada",
+                time_budget_seconds: Optional[float] = None) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
         log = log or (lambda _: None); progreso = progreso or (lambda _: None)
+        job_started = time.perf_counter()
+        budget = None if time_budget_seconds is None else max(0.0, float(time_budget_seconds))
         self.jobs += 1
         prep = self._ensure_models(log)
         nombre_perfil, cfg_perfil = v4.perfil_diarizacion(diar_profile)
@@ -214,7 +217,6 @@ class DiarizationEngine:
         original = legacy.decodificar_audio_mono(ruta, int(sd.sample_rate))
         decode_seconds = time.perf_counter() - t_decode
         sr = int(sd.sample_rate); audio_seconds = len(original) / sr if sr else 0.0
-        # V5.1/V5.2 pueden reutilizar este PCM y evitar una segunda decodificación.
         self._last_decoded_audio = original
         self._last_decoded_audio_rate = sr
         self._last_decoded_audio_path = str(ruta)
@@ -238,6 +240,7 @@ class DiarizationEngine:
             "requested_speakers": None if num_speakers < 0 else int(num_speakers),
             "speech_region_reduction": reduccion, "selected_threshold": None,
             "retry": False, "retry_requested": False, "retry_avoided": False,
+            "retry_skipped_budget": False,
             "passes": 1, "num_threads": int(self.threads or 1),
             "diarization_profile": nombre_perfil, "window_shift_ratio": shift,
             "selection_reason": "manual" if num_speakers >= 0 else "primera_pasada_estable",
@@ -249,6 +252,7 @@ class DiarizationEngine:
             "clustering_config_seconds": float(engine_meta["clustering_config_seconds"]),
             "decode_seconds": decode_seconds, "reduction_seconds": reduction_seconds,
             "sherpa_pass_timings": [],
+            "time_budget_seconds": budget,
         }
 
         if adaptive and num_speakers < 0:
@@ -269,20 +273,33 @@ class DiarizationEngine:
                     "first_analysis": a, "initial_threshold": initial_th,
                     "retry_threshold": retry_th, "retry_reason": motivo,
                     "diarization_profile": nombre_perfil,
+                    "first_pass_wall_seconds": float(timing_a.get("process_wall_seconds", 0.0) or 0.0),
+                    "elapsed_before_retry_seconds": time.perf_counter() - job_started,
+                    "time_budget_seconds": budget,
                 }
                 pre = self._auto_pre_retry(hook_context) or {}
                 if pre:
                     meta["auto_precheck"] = dict(pre.get("meta") or {})
-                if bool(pre.get("accepted")):
+                skip_retry = bool(pre.get("skip_retry"))
+                accepted = bool(pre.get("accepted"))
+                if accepted or skip_retry:
                     turnos = [dict(t) for t in (pre.get("turns") or turnos_a)]
                     elegido = dict(pre.get("analysis") or v4.analizar_turnos(turnos, audio_seconds))
                     meta["retry_avoided"] = True
+                    meta["retry_skipped_budget"] = skip_retry
                     meta["retry_reason"] = motivo
-                    meta["selection_reason"] = str(pre.get("selection_reason") or "precheck_identidad_evito_segunda_pasada")
+                    meta["selection_reason"] = str(
+                        pre.get("selection_reason")
+                        or ("presupuesto_tiempo_omite_segunda_pasada" if skip_retry
+                            else "precheck_identidad_evito_segunda_pasada")
+                    )
                     meta["selected_analysis"] = elegido
                     meta["candidates"][0]["precheck"] = dict(pre.get("meta") or {})
                     progreso(100.0)
-                    log("Auto: precheck acústico aceptó la primera pasada refinada; se evita repetir sherpa completo.")
+                    if skip_retry:
+                        log("Auto: segunda pasada omitida por presupuesto de rendimiento; resultado marcado como ambiguo.")
+                    else:
+                        log("Auto: precheck acústico aceptó la primera pasada refinada; se evita repetir sherpa completo.")
                 else:
                     meta["retry"] = True; meta["passes"] = 2
                     log(f"Auto: resultado estructuralmente sospechoso ({motivo}); segunda pasada con umbral {retry_th:.2f}.")
@@ -298,8 +315,6 @@ class DiarizationEngine:
                     turnos, elegido, razon, extra = self._auto_choose_candidates(
                         (turnos_a, a), (turnos_b, b), motivo, choose_context
                     )
-                    if turnos is turnos_b:
-                        meta["selected_threshold"] = retry_th
                     meta["selection_reason"] = razon; meta["retry_reason"] = motivo
                     meta["selected_analysis"] = elegido
                     meta["stability_delta_speakers"] = abs(int(a.get("speaker_count", 0)) - int(b.get("speaker_count", 0)))
@@ -329,5 +344,6 @@ class DiarizationEngine:
         meta["sherpa_process_wall_seconds"] = process_wall
         meta["detected_speakers"] = len({int(t["speaker"]) for t in turnos})
         meta["turns"] = len(turnos)
+        meta["wall_seconds"] = time.perf_counter() - job_started
         progreso(100.0)
         return turnos, meta
