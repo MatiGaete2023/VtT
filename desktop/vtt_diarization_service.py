@@ -10,10 +10,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 import vtt_diarization_v5 as diar5
-
-
-class DiarizacionCancelada(Exception):
-    pass
+from vtt_diarization_errors import DiarizacionCancelada
 
 
 def _worker_loop(carpeta_modelos: str, comandos, eventos) -> None:
@@ -102,6 +99,7 @@ class PersistentDiarizationService:
         log: Optional[Callable[[str], None]] = None,
         progreso: Optional[Callable[[float], None]] = None,
         cancelado: Optional[Callable[[], bool]] = None,
+        time_budget_seconds: Optional[float] = None,
     ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
         log = log or (lambda _: None)
         progreso = progreso or (lambda _: None)
@@ -124,6 +122,7 @@ class PersistentDiarizationService:
             "speech_regions": regiones,
             "adaptive": bool(adaptive),
             "diar_profile": str(diar_profile),
+            "time_budget_seconds": time_budget_seconds,
         })
 
         while True:
