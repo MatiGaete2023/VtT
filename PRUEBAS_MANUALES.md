@@ -1,4 +1,4 @@
-# Pruebas manuales obligatorias — VtT V5.2
+# Pruebas manuales obligatorias — VtT V5.2.1
 
 Este archivo registra lo que CI no puede sustituir y, separadamente, campañas reproducibles ya ejecutadas. Cada prueba manual debe anotar fecha, commit/artefacto, equipo, SO, configuración, resultado y evidencia no sensible.
 
@@ -13,7 +13,7 @@ Estados: `PENDIENTE`, `OK`, `FALLA`, `NO_APLICA`.
 - [ ] `.venv` antigua + cambio de `requirements.txt`: detectar hash distinto e instalar.
 - [ ] `python run.py --repair` repara dependencias sin tocar transcripciones.
 - [ ] ventana principal visible/redimensionable en la pantalla objetivo.
-- [ ] migración V5.1→V5.2: una combinación no estándar se conserva como **Personalizado** sin cambiar modelo/perfiles.
+- [ ] migración V5.1→V5.2.1: una combinación no estándar se conserva como **Personalizado** sin cambiar controles.
 
 ### macOS/Linux
 
@@ -21,83 +21,126 @@ Estados: `PENDIENTE`, `OK`, `FALLA`, `NO_APLICA`.
 - [ ] Linux: mensaje claro si faltan Tk/PortAudio.
 - [ ] macOS: archivos normales sin BlackHole; loopback solo con dispositivo virtual.
 
-## 2. Archivos y salidas
+## 2. Presets globales V5.2.1
+
+Antes de iniciar, confirmar visualmente que el resumen efectivo coincide con el preset:
+
+- [ ] **Rápido:** small + ASR Rápido + Hablantes Auto + diarización Rápida 0.25.
+- [ ] **Equilibrado:** small + ASR Equilibrado + Hablantes Auto + diarización Equilibrada 0.20.
+- [ ] **Preciso:** medium + ASR Preciso + Hablantes Auto + diarización Equilibrada 0.20.
+- [ ] **Personalizado:** modificar un componente y confirmar que el preset pasa a Personalizado.
+- [ ] Precisa 0.10 solo es seleccionable/operativa mediante Personalizado.
+
+La prueba institucional del 12/09/2026 que mostró `Modo global Equilibrado` + `Hablantes No` corresponde a V5.2 anterior y no debe repetirse con V5.2.1.
+
+## 3. Archivos, cancelación y recuperación
 
 - [ ] MP3/WAV/M4A/OGG/FLAC.
 - [ ] MP4/WEBM/MKV/MOV con audio.
 - [ ] contenedor sin pista de audio rechazado antes de transcribir.
 - [ ] archivo dañado + válido en mismo lote: éxito parcial y continuación.
 - [ ] salida existente: `nombre (2)`, sin sobrescribir.
-- [ ] cancelación con segmentos: salida parcial identificada.
+- [ ] cancelar durante ASR: salida parcial cuando existan segmentos.
+- [ ] cancelar durante diarización: debe registrarse como **cancelación**, no `archivo_fallido`.
+- [ ] tras terminar ASR e iniciar diarización existe `<stem>_ASR_RECUPERABLE.json`.
+- [ ] si diarización se cancela/falla, el checkpoint ASR permanece legible.
+- [ ] si el trabajo termina correctamente, el checkpoint ASR se elimina.
 - [ ] YouTube: salida final fuera del temporal eliminado al cerrar.
 
-## 3. Grabación
+## 4. Métricas y exportación
 
-### Micrófono
+En JSON final comprobar:
 
-- [ ] dos grabaciones dentro del mismo segundo producen WAV distintos.
-- [ ] medidor de nivel funciona.
-- [ ] desconexión/cambio de dispositivo muestra error y no deja UI atrapada.
-- [ ] disco lento/cola pendiente: WAV solo listo tras finalizar writer.
+- [ ] `processing_seconds = asr + diarization + export + overhead`.
+- [ ] `report_generation_seconds` existe por separado.
+- [ ] `end_to_end_seconds = model_load + processing + report_generation`.
+- [ ] `performance.within_realtime` coincide con `processing_seconds <= audio_seconds`.
+- [ ] `performance.end_to_end_within_realtime` refleja la espera completa cuando corresponde.
+- [ ] JSON final no conserva un estado `performance` anterior a la exportación.
+- [ ] Word se genera una vez por salida final y abre correctamente.
+- [ ] tiempos/labels visibles en Word son coherentes con JSON, salvo que el JSON es autoritativo para el tiempo de generación del propio informe.
 
-### Audio del sistema
+## 5. ASR y precisión léxica
 
-Windows:
+Sobre el mismo audio registrar modelo, preset, ASR, backend, Batch, Beam, carga y texto dudoso.
 
-- [ ] loopback `soundcard` disponible.
-- [ ] medidor responde al audio reproducido.
-- [ ] WAV contiene el audio real.
-- [ ] desconectar dispositivo conserva parcial y muestra error.
+- [ ] small / Equilibrado.
+- [ ] medium / Equilibrado si small pierde demasiada precisión.
+- [ ] medium / Preciso solo cuando el costo se justifique.
 
-Linux/macOS:
+No cambiar ASR y diarización a la vez cuando se intenta atribuir una mejora a un solo factor.
 
-- [ ] monitor PulseAudio/PipeWire cuando exista.
-- [ ] BlackHole u otro dispositivo virtual en macOS cuando corresponda.
+## 6. Diarización V5.2.1 en audio escuchable
 
-## 4. ASR y modos globales
+Referencia inicial: **Equilibrado + Auto + Word/JSON**.
 
-Sobre el mismo audio registrar modelo, modo global, Perfil ASR, backend, Batch, Beam, carga, ASR seconds y procesamiento total.
+Registrar:
 
-- [ ] modo Rápido.
-- [ ] modo Equilibrado.
-- [ ] modo Preciso.
-- [ ] Personalizado conserva los controles elegidos.
-- [ ] GPU automática con CUDA compatible, si existe; confirmar fallback CPU.
-
-No atribuir diferencias entre PCs distintos al perfil.
-
-## 5. Diarización V5.2 en audio escuchable
-
-Referencia: hablantes Auto, diarización Equilibrada y Word/JSON activos.
-
-Registrar clusters sherpa, clusters tras identidad, hablantes con texto, clusters sin texto, perfil/shift, pasadas, precheck, selección identity-aware, wall por pasada, tiempo total, reutilización, embeddings/cache, sonda/detalle de turnos largos, reasignaciones y consistencia.
-
-Cuando exista selección identity-aware, registrar también:
-
-- `final_stage_wall_seconds`;
-- `light_identity_wall_seconds`;
-- `total_wall_seconds` / `identity_wall_seconds`.
+- clusters Sherpa seleccionados;
+- `engine_identity_clusters`;
+- `identity_consistency_clusters`;
+- `identity_clusters_after_refinement`;
+- hablantes con texto;
+- IDs acústicos sin texto;
+- `identity_count_mismatch`;
+- perfil/shift/hilos;
+- presupuesto Auto;
+- pasadas y decisión de retry;
+- precheck y selección identity-aware;
+- wall por pasada;
+- Sherpa segmentation/embedding/clustering cuando esté disponible;
+- identidad final/ligera/total;
+- tiempo completo/end-to-end.
 
 Comprobar:
 
-- [ ] una misma `Persona N` no representa evidentemente dos voces diferentes;
+- [ ] una misma `Persona N` no representa evidentemente dos voces distintas;
 - [ ] intervenciones breves reales no desaparecen solo por duración;
-- [ ] cambio sostenido dentro de un turno largo produce corte razonable;
+- [ ] cambio sostenido dentro de turno largo produce corte razonable;
 - [ ] Auto ambiguo/reservado se presenta como estimación;
 - [ ] manual N respeta el conteo solicitado;
-- [ ] cluster acústico sin palabras sigue visible en el reporte;
-- [ ] si el precheck evita segunda pasada, no introduce fusión audible incorrecta.
+- [ ] cluster acústico sin palabras sigue visible;
+- [ ] si el presupuesto omite la segunda pasada, el estado es `estimacion_ambigua_presupuesto` o equivalente visible;
+- [ ] si el precheck evita retry por evidencia acústica, no introduce una fusión audible incorrecta.
 
-## 6. Reutilización/rendimiento
+## 7. Campaña institucional prioritaria
 
-Sin cerrar VtT, procesar dos archivos con el mismo perfil y luego cambiar el perfil.
+Usar el mismo archivo de 6:44 que motivó V5.2.1 y el mismo PC institucional.
 
-- [ ] segundo trabajo reutiliza modelos/motor cuando corresponde.
-- [ ] registrar preparación/inicialización.
-- [ ] cambio de `window_shift_ratio` reinicializa motor.
-- [ ] comparar `processing_seconds` con duración sin tratar real-time como garantía.
+### 7.1 Equilibrado + Auto
 
-## 7. Smoke acústico V5.2 — OK 09-09-2026
+- [ ] mantener VtT abierto durante la campaña;
+- [ ] confirmar antes de iniciar: small / ASR Equilibrado / Auto / Equilibrada 0.20;
+- [ ] registrar carga modelo y ASR;
+- [ ] registrar `diarization_time_budget_seconds`;
+- [ ] registrar primera pasada Sherpa;
+- [ ] confirmar si el precheck resuelve o si se activa la regla de presupuesto;
+- [ ] registrar si la segunda pasada fue ejecutada, evitada o omitida por presupuesto;
+- [ ] revisar calidad de las etiquetas Persona N;
+- [ ] comparar `processing_seconds` y `end_to_end_seconds` con 404 s de audio.
+
+Referencia previa sin diarización: small/Equilibrado ≈164 s ASR. Con reserva de 5 s, el presupuesto orientativo de diarización para objetivo 1.0× es ≈235 s. Es una meta, no una garantía.
+
+### 7.2 Hilos
+
+Solo si diarización sigue dominando. Mantener idénticos audio/preset/modelos y variar exclusivamente:
+
+- [ ] `VTT_DIAR_THREADS=1`.
+- [ ] `VTT_DIAR_THREADS=2`.
+- [ ] `VTT_DIAR_THREADS=4`.
+
+No asumir que más hilos es más rápido. Registrar wall de Sherpa y sus embeddings.
+
+## 8. Reutilización
+
+Sin cerrar VtT, procesar dos trabajos compatibles:
+
+- [ ] segundo trabajo reutiliza Whisper cuando modelo/backend no cambian;
+- [ ] segundo trabajo reutiliza modelos/motor de diarización cuando corresponde;
+- [ ] cambio de `window_shift_ratio` reinicializa motor;
+- [ ] carga de modelo se distingue de processing/end-to-end.
+
+## 9. Smoke acústico histórico — OK 09-09-2026
 
 - [x] 2 hablantes → 2.
 - [x] 4 hablantes → 4.
@@ -105,125 +148,102 @@ Sin cerrar VtT, procesar dos archivos con el mismo perfil y luego cambiar el per
 - [x] identidad habilitada.
 - [x] PCM reutilizado desde diarización.
 - [x] segundo trabajo reutiliza modelos/motor/extractor.
-- [x] conteos correctos preservados.
-- [x] workflow temporal eliminado.
 
-Esto es smoke de conteo/reutilización, no DER/JER.
+Es smoke de conteo/reutilización, no DER/JER.
 
-## 8. Benchmark ASR reproducible — OK 09-09-2026
+## 10. Regresiones automáticas V5.2.1 — OK 13-09-2026
 
-Sobre `jfk.flac` público de OpenAI con timestamps por palabra:
+`Desktop checks #91`, run `34729633409`, commit `e35c1270b579964d4e9062dae929e7742c374c63`:
+
+- [x] Windows, Ubuntu y macOS verdes.
+- [x] `py_compile` verde.
+- [x] **99 pruebas** pasan.
+- [x] excepción de cancelación compartida.
+- [x] traducción de cancelación en pipeline.
+- [x] checkpoint ASR recuperable atómico.
+- [x] reproducción 8 Sherpa / 10 identidad / 9 texto / raw5 sin colapsar conteos.
+- [x] performance final recalculado.
+- [x] processing vs end-to-end.
+- [x] DOCX V5.2 con un solo `Document.save()`.
+- [x] presets completos y compatibilidad legacy.
+- [x] presupuesto temporal Auto.
+
+## 11. Empaquetado escritorio V5.2.1 — OK 13-09-2026
+
+`Desktop executables #10`, run `34729719142`, commit de build `73eb316d1b5ee21b4b0c50aa2590a53e0f7e3edb`: **success**.
+
+Artefactos de GitHub Actions (digest del archivo de artefacto/ZIP):
 
 ```text
-medium / Preciso      ~5.9 s · ~1.87x
-medium / Equilibrado  ~4.6 s · ~2.38x
-small  / Preciso      ~3.2 s · ~3.47x
-small  / Equilibrado  ~1.5 s · ~7.45x
+Windows  127.406.261 bytes  sha256:9fd75ca1c7fb9ffa92fb6db2930a332bdbc478cf6a1ce2f3b4af94745d914228
+Ubuntu   186.939.422 bytes  sha256:459c7e853694c61a902e21c37506aecc6720c157f49ed834c27c4afafe556412
+macOS    199.141.220 bytes  sha256:cdeca75e0177c0f834faa29bad1f69d58a40e52ce523bebab9718b000ce004d7
 ```
 
-- [x] cuatro combinaciones ejecutan.
-- [x] JSON/CSV generados en campaña.
-- [x] similitud 1.000 frente a medium/Preciso en esa muestra.
+Expiran el 12 de diciembre de 2026.
 
-No extrapolar al audio chileno del usuario ni a otro hardware.
-
-## 9. Android físico ARM64
-
-### Modelos/offline
-
-- [ ] cortar primera descarga y confirmar reanudación.
-- [ ] truncar/alterar modelo y comprobar rechazo/reacquisition.
-- [ ] modo avión tras modelo válido.
-
-### Ciclo de vida
-
-- [ ] rotación.
-- [ ] fondo/vuelta.
-- [ ] cancelar en descarga, decodificación y transcripción.
-- [ ] ACTION_SEND / ACTION_VIEW.
-- [ ] TXT/SRT/edición.
-- [ ] restaurar último documento tras reinicio de proceso.
-
-### Audio por bloques
-
-Probar 10, 60 y >90 minutos:
-
-- [ ] sin OOM por PCM completo;
-- [ ] timestamps globales crecientes;
-- [ ] sin duplicación evidente en uniones ~88 s;
-- [ ] sin pérdida de frase completa en empalme;
-- [ ] cancelación intermedia;
-- [ ] memoria, batería y temperatura.
-
-## 10. APK/release — CI OK, hardware pendiente
-
-`Android APK #28`, run `34424903439`, commit `5f51ae8c197cbd7ec8a72eb8e9c93e1532b2713a`:
-
-- [x] build debug final verde.
-- [x] artefacto debug y release rodante publicados por CI.
-- [x] ausencia de keystore detectada y ruta firmada omitida de forma explícita.
-- [ ] instalar APK final en teléfono físico y completar flujo.
-- [ ] con secrets de firma, producir/verificar APK firmado y `.sha256`.
-- [ ] probar actualización entre dos releases firmadas con el mismo certificado.
-
-La ausencia de keystore de producción es **PENDIENTE EXTERNO**, no fallo del repositorio. Ver `android/RELEASE_SETUP.md`.
-
-## 11. Empaquetado escritorio — OK 09-09-2026
-
-`Desktop executables #9`, run `34425016894`, commit `2156cae37ca2ecbaec5c57081d6f6c3409086e10`:
-
-- [x] Windows PyInstaller.
-- [x] Ubuntu PyInstaller.
-- [x] macOS PyInstaller.
-- [x] artefactos en los tres sistemas.
-- [x] incluye el reporting V5.2 corregido.
-- [x] workflow restaurado a `workflow_dispatch` sin trigger temporal.
+- [x] PyInstaller Windows.
+- [x] PyInstaller Ubuntu.
+- [x] PyInstaller macOS.
+- [x] trigger temporal retirado después de disparar el build.
 - [ ] abrir/usar cada ejecutable en hardware real.
 
-Artefactos de CI:
+## 12. Grabación
 
-```text
-Windows  126.869.660 bytes  sha256:da874a760725d77526a8358dd44751988d0c79c4d04f72576871d3d66a74d8e5
-Ubuntu   186.194.313 bytes  sha256:577d937bbe8ec7205bfadab540f16d1f4b52d7bd0e066df16c5198ee1e631121
-macOS    198.803.059 bytes  sha256:6f2f2f6b9bff8eb34d68ee8cd4446c1c420deef796f3340df4ef71df250323bd
-```
+### Micrófono
 
-Caducidad CI: 9 de diciembre de 2026.
+- [ ] dos grabaciones dentro del mismo segundo producen WAV distintos.
+- [ ] medidor de nivel funciona.
+- [ ] desconexión/cambio de dispositivo muestra error y no deja UI atrapada.
 
-## 12. Regresiones automáticas de identidad/reporting — OK 09-09-2026
+### Audio del sistema
 
-`Desktop checks #73`, run `34424880813`:
+Windows:
 
-- [x] `vtt_diarization_v52_metrics.py` incluido en `py_compile`.
-- [x] prueba de suma simple `final + light`.
-- [x] valores negativos parciales no reducen el total válido.
-- [x] múltiples llamadas `_light_identity` simuladas se acumulan completas.
-- [x] `identity_wall_seconds` coincide con `total_wall_seconds`.
-- [x] DOCX nuevo no contiene `Control identidad V5.1`.
-- [x] DOCX contiene `Control identidad V5.2`.
-- [x] DOCX expone total/final/ligero de identidad con los valores esperados.
-- [x] Windows, Ubuntu y macOS verdes.
+- [ ] loopback `soundcard` disponible.
+- [ ] medidor responde al audio reproducido.
+- [ ] WAV contiene audio real.
 
-Estas pruebas validan contabilidad y salida estructural; no validan calidad acústica.
+Linux/macOS:
 
-## 13. CI/documentación — OK 09-09-2026
+- [ ] monitor PulseAudio/PipeWire cuando exista.
+- [ ] BlackHole u otro dispositivo virtual en macOS cuando corresponda.
 
-- [x] Markdown dentro de `desktop/` queda excluido de `Desktop checks`.
-- [x] Markdown dentro de `android/` queda excluido de `Android APK`.
-- [x] modificar los workflows mismos sigue disparando su validación.
-- [x] `Desktop checks #73` verifica el workflow de escritorio actualizado.
-- [x] `Android APK #28` verifica el workflow Android actualizado.
+## 13. Android físico ARM64
 
-## 14. Registro de campañas manuales
+- [ ] cortar primera descarga y confirmar reanudación.
+- [ ] alterar modelo y comprobar rechazo/reacquisition.
+- [ ] modo avión tras modelo válido.
+- [ ] rotación/fondo/vuelta.
+- [ ] cancelar descarga, decodificación y transcripción.
+- [ ] ACTION_SEND / ACTION_VIEW.
+- [ ] audio de 10, 60 y >90 min sin OOM.
+- [ ] timestamps globales crecientes y empalmes sin duplicación/pérdida notable.
+- [ ] memoria, batería y temperatura.
 
-No marcar hardware como ejecutado por CI.
+## 14. APK/release
+
+Última campaña Android funcional previamente verificada: `Android APK #28`, run `34424903439`.
+
+- [x] build debug CI verde.
+- [x] artefacto y release rodante.
+- [x] ausencia de keystore manejada según diseño.
+- [ ] instalar APK en teléfono físico.
+- [ ] producir/verificar release firmado cuando existan secrets.
+
+## 15. Registro de campaña manual
 
 ```text
 Fecha:
 Commit/artefacto:
 Equipo/SO:
+Audio:
+Preset/configuración:
+Hilos:
 Pruebas ejecutadas:
-Resultado:
+Tiempos:
+Conteos:
+Resultado acústico:
 Fallos/limitaciones:
 Evidencia:
 ```
