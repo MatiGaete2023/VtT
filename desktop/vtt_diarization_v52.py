@@ -7,7 +7,7 @@ Objetivos:
   sherpa completo;
 - usar consistencia de identidad cuando dos candidatos Auto siguen ambiguos;
 - reutilizar PCM, extractor y embeddings durante todo el job;
-- mantener un presupuesto acotado para el precheck.
+- mantener un presupuesto acotado para el precheck y para la segunda pasada.
 """
 from __future__ import annotations
 
@@ -28,14 +28,42 @@ IDENTITY_AWARE_STRUCTURAL_THRESHOLD = 2.0
 IDENTITY_AWARE_CLOSE_SCORE = 1.0
 
 
-def selected_raw_candidate(meta: Dict[str, Any]) -> Dict[str, Any]:
-    """Determina qué candidato sherpa originó la solución seleccionada.
+def should_skip_retry_for_budget(
+    *, time_budget_seconds: Optional[float], elapsed_seconds: float,
+    first_pass_seconds: float, precheck_seconds: float = 0.0,
+) -> Dict[str, Any]:
+    """Decide si pagar otra pasada haría inviable el presupuesto disponible.
 
-    V5.2 puede devolver una lista refinada distinta por identidad, por lo que
-    ya no es fiable decidir por identidad de objeto (``turnos is turnos_b``).
-    La trazabilidad se resuelve con la razón/selección explícita y los
-    candidatos guardados por V5.
+    Se usa el costo real de la primera pasada como estimación conservadora de
+    una segunda. No interrumpe la primera pasada: solo evita repetir todo
+    sherpa cuando el tiempo restante ya no alcanza.
     """
+    if time_budget_seconds is None:
+        return {
+            "enabled": False, "skip": False, "budget_seconds": None,
+            "elapsed_seconds": max(0.0, float(elapsed_seconds or 0.0)),
+            "projected_second_pass_seconds": max(0.0, float(first_pass_seconds or 0.0)),
+            "projected_total_seconds": None,
+        }
+    budget = max(0.0, float(time_budget_seconds or 0.0))
+    elapsed = max(0.0, float(elapsed_seconds or 0.0)) + max(
+        0.0, float(precheck_seconds or 0.0)
+    )
+    predicted_second = max(0.0, float(first_pass_seconds or 0.0))
+    projected = elapsed + predicted_second
+    return {
+        "enabled": True,
+        "skip": projected > budget,
+        "budget_seconds": budget,
+        "elapsed_seconds": elapsed,
+        "projected_second_pass_seconds": predicted_second,
+        "projected_total_seconds": projected,
+        "remaining_seconds": max(0.0, budget - elapsed),
+    }
+
+
+def selected_raw_candidate(meta: Dict[str, Any]) -> Dict[str, Any]:
+    """Determina qué candidato sherpa originó la solución seleccionada."""
     candidates = list(meta.get("candidates") or [])
     selected = "first"
     aware = dict(meta.get("identity_aware_selection") or {})
@@ -55,12 +83,11 @@ def selected_raw_candidate(meta: Dict[str, Any]) -> Dict[str, Any]:
         "se_conserva_primera_pasada",
         "primera_pasada_estable",
         "precheck_identidad_evito_segunda_pasada",
+        "presupuesto_tiempo_omite_segunda_pasada",
         "seleccion_identity_aware_first",
     }:
         selected = "first"
     elif bool(meta.get("retry")) and len(candidates) > 1:
-        # Fallback conservador para metadatos antiguos: el threshold elegido
-        # permite identificar la segunda pasada sin comparar listas Python.
         try:
             chosen_th = float(meta.get("selected_threshold"))
             second_th = float(candidates[1].get("threshold"))
@@ -191,11 +218,17 @@ class DiarizationEngine(v5.DiarizationEngine):
             }
         result = self._light_identity(context["first_turns"], context)
         if result is None:
-            return {
-                "accepted": False,
-                "meta": {"enabled": False, "reason": "audio_no_reutilizable"},
+            result = {
+                "turns": context["first_turns"],
+                "analysis": context["first_analysis"],
+                "consistency": {"overall_confidence": "sin_datos", "low_confidence_speakers": 0},
+                "identity_penalty": 0.0,
+                "extraction": {}, "refinement": {},
+                "wall_seconds": 0.0, "new_embedding_calls": 0,
             }
-        self._v52_first_precheck = result
+        else:
+            self._v52_first_precheck = result
+
         before_n = int(context["first_analysis"].get("speaker_count", 0) or 0)
         after_n = int(result["analysis"].get("speaker_count", 0) or 0)
         penalty = float(result["analysis"].get("penalty", 0.0) or 0.0)
@@ -206,6 +239,13 @@ class DiarizationEngine(v5.DiarizationEngine):
             and penalty <= PRECHECK_ACCEPT_PENALTY
             and low == 0
         )
+        budget = should_skip_retry_for_budget(
+            time_budget_seconds=context.get("time_budget_seconds"),
+            elapsed_seconds=float(context.get("elapsed_before_retry_seconds", 0.0) or 0.0),
+            first_pass_seconds=float(context.get("first_pass_wall_seconds", 0.0) or 0.0),
+            precheck_seconds=float(result.get("wall_seconds", 0.0) or 0.0),
+        )
+        skip_budget = bool(not accepted and budget.get("skip"))
         meta = {
             "enabled": True, "accepted": accepted,
             "speakers_before": before_n, "speakers_after": after_n,
@@ -216,11 +256,19 @@ class DiarizationEngine(v5.DiarizationEngine):
             "embedding_calls": int(result["new_embedding_calls"]),
             "refinement": result["refinement"], "extraction": result["extraction"],
             "budget_max_embeddings": PRECHECK_MAX_EMBEDDINGS,
+            "time_budget": budget,
+            "retry_skipped_budget": skip_budget,
         }
         return {
-            "accepted": accepted, "turns": result["turns"],
-            "analysis": result["analysis"], "meta": meta,
-            "selection_reason": "precheck_identidad_evito_segunda_pasada",
+            "accepted": accepted,
+            "skip_retry": skip_budget,
+            "turns": result["turns"],
+            "analysis": result["analysis"],
+            "meta": meta,
+            "selection_reason": (
+                "presupuesto_tiempo_omite_segunda_pasada"
+                if skip_budget else "precheck_identidad_evito_segunda_pasada"
+            ),
         }
 
     def _auto_choose_candidates(self, first, second, reason, context):
@@ -285,6 +333,7 @@ class DiarizationEngine(v5.DiarizationEngine):
         progreso: Optional[Callable[[float], None]] = None,
         speech_regions: Optional[Sequence[Sequence[float]]] = None,
         adaptive: bool = False, diar_profile: str = "Equilibrada",
+        time_budget_seconds: Optional[float] = None,
     ):
         log = log or (lambda _: None); progreso = progreso or (lambda _: None)
         self._v52_runtime = None; self._v52_first_precheck = None
@@ -292,6 +341,7 @@ class DiarizationEngine(v5.DiarizationEngine):
             ruta, num_speakers=num_speakers, threshold=threshold,
             log=log, progreso=progreso, speech_regions=speech_regions,
             adaptive=adaptive, diar_profile=diar_profile,
+            time_budget_seconds=time_budget_seconds,
         )
         meta = dict(meta or {})
 
@@ -318,7 +368,6 @@ class DiarizationEngine(v5.DiarizationEngine):
         }
         rt = self._runtime(context)
         if rt is None:
-            # Compatibilidad defensiva: la configuración actual de sherpa usa 16 kHz.
             import vtt_diarization as legacy
             t_dec = time.perf_counter()
             audio = legacy.decodificar_audio_mono(ruta, 16000)
