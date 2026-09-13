@@ -2,11 +2,11 @@
 
 **Actualizado:** 13 de septiembre de 2026  
 **Rama de trabajo:** `claude/voice-transcriber-multiplatform-6xifq1`  
-**Estado:** **V5.2.1 — INTEGRACIÓN CORREGIDA; SIGUIENTE FASE = BENCHMARK INSTITUCIONAL CONTROLADO**
+**Estado:** **V5.2.1 — INTEGRACIÓN, CI Y EMPAQUETADO CERRADOS; SIGUIENTE FASE = BENCHMARK INSTITUCIONAL CONTROLADO**
 
 ## 1. Objetivo
 
-VtT ofrece transcripción local y privada en escritorio Windows/macOS/Linux y Android ARM64. La prioridad actual del escritorio es lograr un equilibrio práctico entre precisión de ASR, calidad de separación de voces y tiempo de proceso en CPU institucional, sin presentar Auto como ground truth.
+VtT ofrece transcripción local y privada en escritorio Windows/macOS/Linux y Android ARM64. La prioridad actual del escritorio es lograr un equilibrio práctico entre precisión ASR, calidad de separación de voces y tiempo de proceso en CPU institucional, sin presentar Auto como ground truth.
 
 ## 2. Estado actual
 
@@ -30,6 +30,7 @@ VtT ofrece transcripción local y privada en escritorio Windows/macOS/Linux y An
 - DOCX V5.2 directo de un solo guardado; JSON schema v8.
 - hashes sherpa auditados y fijados.
 - `Desktop checks #91`: 99 pruebas verdes en Windows/macOS/Ubuntu.
+- `Desktop executables #10`: PyInstaller verde en Windows/macOS/Ubuntu.
 
 ### Android
 
@@ -88,7 +89,7 @@ Rótulos V5.2, métricas identidad completas, mapa documental y CI documental op
 
 ### F8 — V5.2.1 integración y presupuesto
 
-Cerrado por código/CI:
+Cerrado por código/CI/build:
 
 - excepción única `DiarizacionCancelada`;
 - ASR recuperable ante fallo/cancelación posterior;
@@ -99,8 +100,9 @@ Cerrado por código/CI:
 - DOCX directo con un solo `Document.save()`;
 - presets globales activan Auto de forma inequívoca;
 - Precisa 0.10 retirada de presets globales;
-- presupuesto Auto proyecta el costo de la segunda pasada y puede omitirla con estado ambiguo;
-- 99 pruebas automatizadas verdes en los tres SO.
+- presupuesto Auto proyecta costo de la segunda pasada y puede omitirla con estado ambiguo;
+- 99 pruebas automatizadas verdes en los tres SO;
+- PyInstaller V5.2.1 verde en los tres SO.
 
 ## 5. Evidencia que motivó F8
 
@@ -129,6 +131,8 @@ Pero diarización quedó desactivada por el bug de semántica del preset. Esa ca
 
 ## 6. Verificación automatizada actual
 
+### Desktop checks
+
 `Desktop checks #91`, run `34729633409`, commit `e35c1270b579964d4e9062dae929e7742c374c63`:
 
 - Windows: success;
@@ -137,7 +141,19 @@ Pero diarización quedó desactivada por el bug de semántica del preset. Esa ca
 - `py_compile`: success;
 - `pytest`: **99 passed**.
 
-El empaquetado V5.2.1 se ejecuta como `Desktop executables #10`; su resultado debe mantenerse en `AUDITORIA.md`/`PRUEBAS_MANUALES.md` una vez finalizado.
+### PyInstaller V5.2.1
+
+`Desktop executables #10`, run `34729719142`, commit de build `73eb316d1b5ee21b4b0c50aa2590a53e0f7e3edb`: **success** en los tres SO.
+
+```text
+Windows  127.406.261 bytes  sha256:9fd75ca1c7fb9ffa92fb6db2930a332bdbc478cf6a1ce2f3b4af94745d914228
+Ubuntu   186.939.422 bytes  sha256:459c7e853694c61a902e21c37506aecc6720c157f49ed834c27c4afafe556412
+macOS    199.141.220 bytes  sha256:cdeca75e0177c0f834faa29bad1f69d58a40e52ce523bebab9718b000ce004d7
+```
+
+Los digests anteriores corresponden a los artefactos publicados por GitHub Actions. Expiran el 12 de diciembre de 2026.
+
+El trigger temporal fue retirado; `desktop-build.yml` volvió al blob permanente `93d5121a6ec87c3fa05a9fff238749a567e479dc` y `workflow_dispatch` como único disparador.
 
 ## 7. Próxima fase — R1 rendimiento institucional controlado
 
@@ -148,16 +164,16 @@ No añadir nuevas heurísticas antes de esta campaña.
 Sobre el mismo audio y PC institucional:
 
 - modo global **Equilibrado**;
-- comprobar en UI antes de iniciar: `small`, ASR Equilibrado, `Hablantes Auto`, diarización Equilibrada 0.20;
+- comprobar antes de iniciar: `small`, ASR Equilibrado, `Hablantes Auto`, diarización Equilibrada 0.20;
 - mantener Word + JSON;
 - registrar carga, ASR, presupuesto de diarización, primera pasada, precheck, decisión de retry, wall sherpa, embeddings, identidad, reportes y end-to-end;
 - revisar calidad humana de cortes de voz.
 
-Meta orientativa: que la diarización quepa en el margen restante después del ASR (~235 s en la prueba previa). No es una promesa de tiempo real.
+Meta orientativa: que la diarización quepa en el margen restante después del ASR (~235 s en la prueba previa). No es promesa de tiempo real.
 
 ### R1.2 — Hilos 1/2/4
 
-Solo si diarización sigue dominando, repetir una configuración idéntica variando `VTT_DIAR_THREADS` = 1, 2, 4. Más hilos no se asumirán más rápidos.
+Solo si diarización sigue dominando, repetir configuración idéntica variando `VTT_DIAR_THREADS` = 1, 2, 4. Más hilos no se asumirán más rápidos.
 
 ### R1.3 — Aislar precisión ASR
 
