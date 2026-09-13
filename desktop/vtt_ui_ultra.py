@@ -10,6 +10,8 @@ from vtt_ultra_config import (
     ULTRA_QUALITY_PROFILE_NAME,
 )
 
+_ULTRA_MODES = {ULTRA_PROFILE_NAME, ULTRA_QUALITY_PROFILE_NAME}
+
 
 class DiarizacionUltraUIMixin(v52.DiarizacionV52UIMixin):
     def _ui(self):
@@ -18,14 +20,21 @@ class DiarizacionUltraUIMixin(v52.DiarizacionV52UIMixin):
             self.root.title("VtT Ultra Windows — velocidad o calidad 90s")
         except Exception:
             pass
+        if hasattr(self, "cmb_global_profile"):
+            self.cmb_global_profile.configure(width=21)
         self._force_ultra_default()
 
     def _aplicar_config(self):
-        # La rama es un producto separado: arranca siempre en Ultra Máxima,
-        # aunque una configuración histórica de VtT estable exista en el mismo
-        # directorio. El usuario puede escoger Ultra Calidad 90s después.
+        # Conserva la variante Ultra elegida en la sesión anterior. Una
+        # configuración de la rama estable (Equilibrado/Preciso/etc.) se migra
+        # a Ultra Máxima para evitar ejecutar accidentalmente otro producto.
         super()._aplicar_config()
-        self._force_ultra_default()
+        current = self.v_global_profile.get() if hasattr(self, "v_global_profile") else ""
+        if current not in _ULTRA_MODES:
+            self._force_ultra_default()
+        else:
+            self._global_profile_run = current
+            self._apply_global_profile()
 
     def _force_ultra_default(self):
         if not hasattr(self, "v_global_profile"):
@@ -54,15 +63,11 @@ class DiarizacionUltraUIMixin(v52.DiarizacionV52UIMixin):
         mode = self.v_global_profile.get()
         if mode == ULTRA_PROFILE_NAME:
             self.lbl_global_profile.configure(
-                text=(
-                    "tiny · ASR Rápido · Auto · 1 pasada · máxima velocidad"
-                )
+                text="tiny · ASR Rápido · Auto · 1 pasada · máxima velocidad"
             )
         elif mode == ULTRA_QUALITY_PROFILE_NAME:
             self.lbl_global_profile.configure(
-                text=(
-                    "base · ASR Rápido · Auto · 1 pasada · palabras + identidad ligera"
-                )
+                text="base · ASR Rápido · Auto · 1 pasada · palabras + identidad ligera"
             )
 
     def _actualizar_resumen_config(self):
