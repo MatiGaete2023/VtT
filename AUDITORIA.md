@@ -2,7 +2,7 @@
 
 **Actualizada:** 13 de septiembre de 2026  
 **Rama:** `claude/voice-transcriber-multiplatform-6xifq1`  
-**Estado:** **CORRECCIONES DE INTEGRACIÓN V5.2.1 IMPLEMENTADAS Y CI MULTIPLATAFORMA VERDE**
+**Estado:** **CORRECCIONES DE INTEGRACIÓN V5.2.1 IMPLEMENTADAS, CI Y EMPAQUETADO MULTIPLATAFORMA VERIFICADOS**
 
 Esta auditoría distingue lo comprobado por código/CI de lo que todavía necesita audio o hardware real.
 
@@ -10,7 +10,7 @@ Esta auditoría distingue lo comprobado por código/CI de lo que todavía necesi
 
 ### Escritorio
 
-Estado: **V5.2.1 implementado**.
+Estado: **V5.2.1 implementado, probado y empaquetado**.
 
 - Python 3.9+; entrypoint `desktop/vtt_main.py`.
 - ASR: faster-whisper/CTranslate2.
@@ -25,10 +25,10 @@ Estado: **V5.2.1 implementado**.
 - Cancelación unificada y checkpoint ASR recuperable antes de diarización.
 - Métricas finales distinguen procesamiento, generación de informes y espera extremo a extremo.
 - JSON maestro schema v8.
-- DOCX V5.2 directo, sin cadena de nueve guardados.
-- Modelos sherpa protegidos por hashes auditados.
+- DOCX V5.2 directo, sin cadena de guardados heredados.
+- Modelos sherpa protegidos por hashes auditados fijados en código.
 - `Desktop checks #91`, run `34729633409`: **99 pruebas verdes en Windows/macOS/Ubuntu**.
-- PyInstaller V5.2.1 se ejecutó posteriormente como `Desktop executables #10`; su resultado se registra al cerrar esta auditoría.
+- `Desktop executables #10`, run `34729719142`: **PyInstaller verde en Windows/macOS/Ubuntu**.
 
 ### Android
 
@@ -68,13 +68,11 @@ Se mantienen como corregidos:
 
 El pipeline V5 capturaba la clase de cancelación del servicio V5, mientras el servicio activo V5.2 declaraba otra clase independiente. Una cancelación durante diarización podía caer en la ruta de error y perder la semántica de cancelación normal.
 
-**Corrección:** `desktop/vtt_diarization_errors.py` define una única `DiarizacionCancelada`, importada por servicios V5/V5.1/V5.2 y por el pipeline. Se añadió regresión que verifica identidad de clase y traducción a `transcriptor_whisper.Cancelado`.
+**Corrección:** `desktop/vtt_diarization_errors.py` define una única `DiarizacionCancelada`, importada por servicios V5/V5.1/V5.2 y por el pipeline. Existe regresión que verifica identidad de clase y traducción a `transcriptor_whisper.Cancelado`.
 
 ### V521-02 [CORREGIDO] Trabajo ASR perdido si falla/cancela diarización
 
 Antes de iniciar diarización se genera atómicamente `<stem>_ASR_RECUPERABLE.json` con texto y segmentos ya reconocidos. Se elimina al completar correctamente y se conserva ante fallo/cancelación. La salida parcial tradicional sigue intentándose.
-
-Esto reduce el costo de recuperación: una etapa acústica posterior no obliga a repetir Whisper.
 
 ### V521-03 [CORREGIDO] Conteo acústico sustituido por hablantes con texto
 
@@ -90,7 +88,7 @@ Esto reduce el costo de recuperación: una etapa acústica posterior no obliga a
 - IDs de texto ausentes del audit de identidad;
 - indicador de mismatch.
 
-La regresión reproduce explícitamente un escenario **8 sherpa / 10 identidades auditadas / 9 con texto / raw 5 sin texto** y comprueba que ninguna magnitud sea colapsada.
+La regresión reproduce explícitamente **8 sherpa / 10 identidades auditadas / 9 con texto / raw 5 sin texto** y comprueba que ninguna magnitud sea colapsada.
 
 ### V521-04 [CORREGIDO] `performance` podía quedar obsoleto después de exportar
 
@@ -106,13 +104,13 @@ Ahora se distinguen:
 - `report_generation_seconds`;
 - `end_to_end_seconds = carga modelo + processing + generación de informes`.
 
-El objetivo de tiempo real del preset usa `processing_seconds`; la espera extremo a extremo queda disponible separadamente.
+El objetivo temporal del preset usa `processing_seconds`; la espera extremo a extremo queda disponible separadamente.
 
 ### V521-06 [CORREGIDO] Word se guardaba repetidamente
 
 El recorrido heredado podía guardar Word múltiples veces porque cada writer versionado llamaba al anterior y el pipeline regeneraba informes.
 
-**Corrección:** V5.2.1 difiere JSON/DOCX hasta el cierre funcional y `vtt_reporting_v52.escribir_docx_detallado()` construye el documento directamente. La regresión instrumenta `Document.save()` y exige exactamente **un guardado**.
+**Corrección:** V5.2.1 difiere JSON/DOCX hasta el cierre funcional y `vtt_reporting_v52.escribir_docx_detallado()` construye el documento directamente. La regresión instrumenta `Document.save()` y exige exactamente **un guardado** por llamada final.
 
 Después del informe final solo se refresca JSON para persistir tiempos/recalcular performance; Word no se reabre.
 
@@ -120,15 +118,15 @@ Después del informe final solo se refresca JSON para persistir tiempos/recalcul
 
 La prueba institucional del 12/09/2026 mostró `Modo global: Equilibrado` junto a `Hablantes: No`. El preset modificaba modelo/perfiles, pero no `v_diarizar` ni `v_num_speakers`.
 
-**Corrección:** Rápido, Equilibrado y Preciso son ahora configuraciones completas y fuerzan `Hablantes: Auto`. Personalizado mantiene libertad manual. Cambiar un componente sale del preset a Personalizado.
+**Corrección:** Rápido, Equilibrado y Preciso son configuraciones completas y fuerzan `Hablantes: Auto`. Personalizado mantiene libertad manual. Cambiar un componente sale del preset a Personalizado.
 
 ### V521-08 [CORREGIDO] Precisa 0.10 dentro del preset Preciso era impráctica en CPU institucional
 
-La campaña institucional con `medium + Preciso + Precisa 0.10` mostró costo prohibitivo de embeddings sherpa. V5.2.1 cambia el preset **Preciso** a diarización **Equilibrada 0.20**. `Precisa 0.10` no se elimina: permanece disponible en Personalizado.
+La campaña institucional con `medium + Preciso + Precisa 0.10` mostró costo prohibitivo de embeddings sherpa. V5.2.1 cambia el preset **Preciso** a diarización **Equilibrada 0.20**. `Precisa 0.10` permanece disponible en Personalizado.
 
 ### V521-09 [CORREGIDO] Auto podía pagar una segunda pasada sin límite temporal
 
-`vtt_performance.py` antes solo evaluaba resultados. Ahora los presets poseen `target_processing_ratio` y calculan un presupuesto wall de diarización una vez terminado ASR.
+Los presets poseen `target_processing_ratio` y calculan un presupuesto wall de diarización una vez terminado ASR.
 
 Tras la primera pasada + precheck, el motor proyecta otra pasada utilizando el wall real de la primera. Si la proyección excede el presupuesto, omite el retry, conserva la primera solución y la validación queda como `estimacion_ambigua_presupuesto`.
 
@@ -151,6 +149,22 @@ Run `34729633409`, commit `e35c1270b579964d4e9062dae929e7742c374c63`: **success*
 - `pytest`: **99 passed**.
 
 Nuevas regresiones cubren cancelación compartida, checkpoint ASR, conteos 8/10/9/raw5, métricas finales/end-to-end, performance stale, un solo guardado DOCX, presets completos y presupuesto Auto.
+
+### Desktop executables #10
+
+Run `34729719142`, commit de build `73eb316d1b5ee21b4b0c50aa2590a53e0f7e3edb`: **success** en Windows, Ubuntu y macOS.
+
+Artefactos de GitHub Actions; los siguientes SHA-256 corresponden al artefacto/ZIP publicado por Actions, no a una firma del ejecutable interior:
+
+```text
+Windows  127.406.261 bytes  sha256:9fd75ca1c7fb9ffa92fb6db2930a332bdbc478cf6a1ce2f3b4af94745d914228
+Ubuntu   186.939.422 bytes  sha256:459c7e853694c61a902e21c37506aecc6720c157f49ed834c27c4afafe556412
+macOS    199.141.220 bytes  sha256:cdeca75e0177c0f834faa29bad1f69d58a40e52ce523bebab9718b000ce004d7
+```
+
+Expiran el 12 de diciembre de 2026.
+
+El trigger temporal usado para lanzar el build se retiró inmediatamente después y `desktop-build.yml` volvió al blob permanente `93d5121a6ec87c3fa05a9fff238749a567e479dc`, con `workflow_dispatch` como único disparador.
 
 ### Smoke acústico histórico V5.2
 
@@ -177,7 +191,7 @@ Conclusión: 0.10 no es viable como perfil global habitual en ese hardware.
 
 ### Small + ASR Equilibrado
 
-El mismo audio, con la diarización **accidentalmente desactivada por el defecto del preset**, tomó aproximadamente:
+El mismo audio, con diarización **accidentalmente desactivada por el defecto del preset**, tomó aproximadamente:
 
 - carga modelo: 12 s;
 - ASR: 164 s;
@@ -198,8 +212,8 @@ Requieren nueva evidencia externa/manual:
 - apertura de ejecutables PyInstaller en hardware objetivo;
 - Android físico: empalmes largos, RAM, batería, temperatura y actualización firmada.
 
-No atribuir la lentitud institucional a antivirus, CPU u ONNX Runtime sin medición controlada.
+No atribuir lentitud institucional a antivirus, CPU u ONNX Runtime sin medición controlada.
 
 ## 8. Resultado actual
 
-V5.2.1 corrige los defectos reproducibles de integración antes de una nueva campaña acústica. La prioridad siguiente no es añadir más heurísticas: es medir **Equilibrado + Auto** en el mismo PC/audio con métricas ahora confiables y, luego, comparar 1/2/4 hilos si la diarización sigue dominando.
+V5.2.1 corrige los defectos reproducibles de integración y queda cubierta por CI y empaquetado multiplataforma. La prioridad siguiente no es añadir más heurísticas: es medir **Equilibrado + Auto** en el mismo PC/audio con métricas ahora confiables y, luego, comparar 1/2/4 hilos si la diarización sigue dominando.
