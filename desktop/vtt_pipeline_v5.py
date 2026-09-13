@@ -11,6 +11,7 @@ import transcriptor_whisper as base
 import vtt_alignment as alignment
 import vtt_core as core
 import vtt_diarization_service as dservice
+from vtt_diarization_errors import DiarizacionCancelada
 import vtt_pipeline_v4 as v4
 import vtt_reporting_v5 as reporting5
 import vtt_tuning as tuning
@@ -78,8 +79,9 @@ class PipelineV5Mixin(v4.PipelineV4Mixin):
                 speech_regions=regiones if reduccion_pre.get("enabled") else None,
                 adaptive=(ns < 0),
                 diar_profile=perfil_diar,
+                time_budget_seconds=opts.get("_diar_time_budget_seconds"),
             )
-        except dservice.DiarizacionCancelada:
+        except DiarizacionCancelada:
             raise base.Cancelado()
 
         asignados, align_meta = alignment.alinear_y_dividir(segs, turnos)
@@ -90,15 +92,29 @@ class PipelineV5Mixin(v4.PipelineV4Mixin):
                 s["words"] = []
 
         meta = dict(meta or {})
-        meta["wall_seconds"] = time.monotonic() - inicio
-        meta["detected_speakers"] = len(speakers)
+        meta["wall_seconds"] = max(
+            float(meta.get("wall_seconds", 0.0) or 0.0),
+            time.monotonic() - inicio,
+        )
+        # No sobrescribir el conteo acústico/identidad que entrega el motor.
+        # Los hablantes con texto son otra magnitud y se conservan por separado.
+        engine_detected = meta.get("detected_speakers")
+        if engine_detected is None:
+            engine_detected = len(speakers)
+            meta["detected_speakers"] = engine_detected
+        meta["detected_speakers_engine"] = int(engine_detected or 0)
+        meta["text_assigned_speakers"] = len(speakers)
+        meta["assigned_raw_speaker_ids"] = sorted({
+            int(s.get("raw_numeric_id")) for s in speakers
+            if s.get("raw_numeric_id") is not None
+        })
         meta["alignment"] = align_meta
         meta["word_timestamps_forced_for_diarization"] = bool(
             getattr(self, "_v5_forced_words_run", False)
         )
         meta["speaker_count_validation"] = validation.evaluar_conteo_hablantes(
             meta,
-            len(speakers),
+            int(engine_detected or 0),
             manual_requested=(None if ns < 0 else ns),
         )
 
@@ -163,6 +179,9 @@ class PipelineV5Mixin(v4.PipelineV4Mixin):
             "sherpa_internal_timing_available": diar_meta.get("sherpa_internal_timing_available", False),
             "sherpa_internal": diar_meta.get("sherpa_internal") or {},
             "sherpa_pass_timings": diar_meta.get("sherpa_pass_timings") or [],
+            "speaker_detected_engine": diar_meta.get("detected_speakers_engine"),
+            "speaker_text_assigned": diar_meta.get("text_assigned_speakers", len(speakers or [])),
+            "assigned_raw_speaker_ids": diar_meta.get("assigned_raw_speaker_ids") or [],
         })
         return m
 
